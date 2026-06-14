@@ -8,7 +8,7 @@ AI_MODEL_NAME = "gemini-2.5-flash"
 [[d1_databases]]
 binding = "DB"
 database_name = "bot_factory_db"
-database_id = "REPLACE_WITH_ID"
+database_id = "707affde-e219-4b26-b5bd-d110c318364d"
 
 [observability]
 enabled = true
