@@ -57,7 +57,81 @@ export class FactoryEngine {
   }
 
   private static setupBot(bot: Bot<FactoryContext>) {
-    // Basic setup, will be expanded in next tasks
+    bot.command("start", async (ctx) => {
+      const db = ctx.env.DB;
+      const config = await db
+        .prepare("SELECT welcome_message, menu_json FROM factory_bots WHERE bot_id = ?")
+        .bind(ctx.botId)
+        .first<{ welcome_message: string; menu_json: string }>();
+
+      if (!config) return;
+
+      const keyboard = new InlineKeyboard();
+      try {
+        const menu = JSON.parse(config.menu_json);
+        menu.forEach((btn: any, i: number) => {
+          keyboard.text(btn.label, `fact_act:${btn.action}`);
+          if (i % 2 === 1) keyboard.row();
+        });
+      } catch (e) {}
+
+      await ctx.reply(config.welcome_message, {
+        parse_mode: "HTML",
+        reply_markup: keyboard,
+      });
+
+      // Persistent Reply Keyboard
+      const replyKeyboard = {
+        keyboard: [] as any[],
+        resize_keyboard: true,
+      };
+      try {
+        const menu = JSON.parse(config.menu_json);
+        menu.forEach((btn: any) => {
+          replyKeyboard.keyboard.push([{ text: btn.label }]);
+        });
+      } catch (e) {}
+
+      if (replyKeyboard.keyboard.length > 0) {
+        await ctx.reply("Acceso directo al menú:", {
+          reply_markup: replyKeyboard,
+        });
+      }
+    });
+
+    bot.on("message:text", async (ctx, next) => {
+      // Handle menu text clicks
+      const db = ctx.env.DB;
+      const config = await db
+        .prepare("SELECT menu_json FROM factory_bots WHERE bot_id = ?")
+        .bind(ctx.botId)
+        .first<{ menu_json: string }>();
+      if (config) {
+        try {
+          const menu = JSON.parse(config.menu_json);
+          const match = menu.find((btn: any) => btn.label === ctx.message.text);
+          if (match) {
+            return await this.handleAction(ctx, match.action);
+          }
+        } catch (e) {}
+      }
+      await next();
+    });
+
+    bot.on("callback_query:data", async (ctx) => {
+      const data = ctx.callbackQuery.data;
+      if (data.startsWith("fact_act:")) {
+        const action = data.split(":")[1];
+        await this.handleAction(ctx, action);
+      }
+      await ctx.answerCallbackQuery().catch(() => {});
+    });
+
     bot.catch((err) => console.error("Grammy error:", err));
+  }
+
+  private static async handleAction(ctx: FactoryContext, action: string) {
+    // Basic implementation, will be expanded in Task 8
+    await ctx.reply(`Acción recibida: ${action}`);
   }
 }
