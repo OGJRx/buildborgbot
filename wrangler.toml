@@ -1,0 +1,14 @@
+name = "fabricaborgbots"
+main = "src/index.ts"
+compatibility_date = "2026-06-14"
+
+[vars]
+AI_MODEL_NAME = "gemini-2.5-flash"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bot_factory_db"
+database_id = "REPLACE_WITH_ID"
+
+[observability]
+enabled = true

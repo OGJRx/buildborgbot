@@ -1,0 +1,29 @@
+{
+  "name": "buildborgbot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OGJRx/buildborgbot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/OGJRx/buildborgbot/issues"
+  },
+  "homepage": "https://github.com/OGJRx/buildborgbot#readme",
+  "dependencies": {
+    "@google/genai": "^2.8.0",
+    "grammy": "^1.44.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260613.1",
+    "typescript": "^6.0.3",
+    "wrangler": "^4.100.0"
+  }
+}
