@@ -201,11 +201,19 @@ export class FactoryEngine {
     try {
       const result = await ai.models.generateContent({
         model: ctx.env.AI_MODEL_NAME,
-        systemInstruction: config.system_prompt,
         contents: contents,
+        config: {
+          systemInstruction: {
+            parts: [{ text: config.system_prompt }],
+          },
+        },
       });
 
-      const responseText = result.text();
+      const responseText = result.text;
+
+      if (!responseText) {
+        throw new Error("No response text from Gemini");
+      }
 
       const sentMsg = await ctx.reply(responseText, { parse_mode: "Markdown" });
       await db

@@ -13,12 +13,16 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "engines": {
+    "node": ">=24"
+  },
   "bugs": {
     "url": "https://github.com/OGJRx/buildborgbot/issues"
   },
   "homepage": "https://github.com/OGJRx/buildborgbot#readme",
   "dependencies": {
     "@google/genai": "^2.8.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "grammy": "^1.44.0"
   },
   "devDependencies": {

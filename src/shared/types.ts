@@ -2,6 +2,7 @@ export interface CoreEnv {
   DB: D1Database;
   GEMINI_API_KEY: string;
   AI_MODEL_NAME: string;
+  TITANIUM_API_SECRET: string;
   [key: string]: any; // For bot tokens (bot1, bot2...)
 }
 

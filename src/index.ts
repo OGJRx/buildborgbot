@@ -50,6 +50,15 @@ export default {
       return Response.json(messages.results);
     }
 
+    // List Bots API
+    if (url.pathname === "/api/factory/bots" && request.method === "GET") {
+      if (request.headers.get("x-titanium-api-secret") !== env.TITANIUM_API_SECRET) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      const bots = await env.DB.prepare("SELECT * FROM factory_bots").all();
+      return Response.json(bots.results);
+    }
+
     return new Response("Not Found", { status: 404 });
   },
 };
