@@ -123,11 +123,101 @@ export class FactoryEngine {
       if (data.startsWith("fact_act:")) {
         const action = data.split(":")[1];
         await this.handleAction(ctx, action);
+      } else if (data.startsWith("fact_exec:")) {
+        const msgId = parseInt(data.split(":")[1], 10);
+        await this.handleConfirmAndProcess(ctx, msgId);
       }
       await ctx.answerCallbackQuery().catch(() => {});
     });
 
+    bot.on("message:text", async (ctx) => {
+      if (ctx.message.text.startsWith("/")) return;
+
+      const text = ctx.message.text;
+      const msgId = ctx.message.message_id;
+
+      await ctx.env.DB.prepare(
+        "INSERT INTO factory_messages (bot_id, chat_id, message_id, role, content) VALUES (?, ?, ?, ?, ?)"
+      )
+        .bind(ctx.botId, String(ctx.chat.id), msgId, "user", text)
+        .run();
+
+      const keyboard = new InlineKeyboard().text(
+        "🚀 Confirmar y Procesar con IA",
+        `fact_exec:${msgId}`
+      );
+
+      await ctx.reply(
+        `<b>¿Estás seguro de enviar esto a la IA?</b>\n\n<i>"${text.substring(0, 100)}${text.length > 100 ? "..." : ""}"</i>`,
+        { parse_mode: "HTML", reply_markup: keyboard }
+      );
+    });
+
     bot.catch((err) => console.error("Grammy error:", err));
+  }
+
+  private static async handleConfirmAndProcess(ctx: FactoryContext, msgId: number) {
+    const db = ctx.env.DB;
+    const botId = ctx.botId;
+    const chatId = String(ctx.chat?.id);
+
+    const msgRecord = await db
+      .prepare(
+        "SELECT content FROM factory_messages WHERE bot_id = ? AND chat_id = ? AND message_id = ?"
+      )
+      .bind(botId, chatId, msgId)
+      .first<{ content: string }>();
+
+    if (!msgRecord) {
+      return await ctx.reply("❌ No se encontró el mensaje original.");
+    }
+
+    const config = await db
+      .prepare("SELECT system_prompt FROM factory_bots WHERE bot_id = ?")
+      .bind(botId)
+      .first<{ system_prompt: string }>();
+
+    if (!config) return;
+
+    // Get History for context
+    const historyRows = await db
+      .prepare(
+        "SELECT role, content FROM factory_messages WHERE bot_id = ? AND chat_id = ? AND message_id < ? ORDER BY created_at DESC LIMIT 10"
+      )
+      .bind(botId, chatId, msgId)
+      .all<{ role: string; content: string }>();
+
+    const contents = (historyRows.results || []).reverse().map((r) => ({
+      role: r.role === "model" ? ("model" as const) : ("user" as const),
+      parts: [{ text: r.content }],
+    }));
+
+    // Add current user message
+    contents.push({ role: "user", parts: [{ text: msgRecord.content }] });
+
+    const { GoogleGenAI } = await import("@google/genai");
+    const ai = new GoogleGenAI({ apiKey: ctx.env.GEMINI_API_KEY });
+
+    try {
+      const result = await ai.models.generateContent({
+        model: ctx.env.AI_MODEL_NAME,
+        systemInstruction: config.system_prompt,
+        contents: contents,
+      });
+
+      const responseText = result.text();
+
+      const sentMsg = await ctx.reply(responseText, { parse_mode: "Markdown" });
+      await db
+        .prepare(
+          "INSERT INTO factory_messages (bot_id, chat_id, message_id, role, content) VALUES (?, ?, ?, ?, ?)"
+        )
+        .bind(botId, chatId, sentMsg.message_id, "model", responseText)
+        .run();
+    } catch (err) {
+      console.error("GenAI Error:", err);
+      await ctx.reply("⚠️ Error técnico al procesar con IA.");
+    }
   }
 
   private static async handleAction(ctx: FactoryContext, action: string) {
