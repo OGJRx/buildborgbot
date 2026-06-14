@@ -1,10 +1,59 @@
 import { Bot, Context, InlineKeyboard } from "grammy";
-import { CoreEnv, BorgExecutionContext, FactoryBotConfig } from "../shared/types";
+
+// --- TITANIUM CORE TYPES ---
+
+export interface CoreEnv {
+  DB: D1Database;
+  GEMINI_API_KEY: string;
+  AI_MODEL_NAME: string;
+  TITANIUM_API_SECRET: string;
+  [key: string]: any;
+}
+
+export interface BorgExecutionContext {
+  traceId: string;
+  waitUntil: (promise: Promise<any>) => void;
+}
+
+export interface FactoryBotConfig {
+  bot_id: string;
+  bot_name: string;
+  token_var_name: string;
+  system_prompt: string;
+  welcome_message: string;
+  menu_json: string;
+}
+
+export interface FactorySequence {
+  step_number: number;
+  title: string;
+  description: string;
+  payload_json: string;
+}
 
 export type FactoryContext = Context & {
   env: CoreEnv;
   botId: string;
 };
+
+// --- TITANIUM LOGGING ---
+
+export class BorgLogger {
+  constructor(
+    private scope: string,
+    private traceId: string
+  ) {}
+
+  info(tag: string, message: string) {
+    console.log(`[${this.scope}][${this.traceId}][INFO][${tag}] ${message}`);
+  }
+
+  error(tag: string, message: string) {
+    console.error(`[${this.scope}][${this.traceId}][ERROR][${tag}] ${message}`);
+  }
+}
+
+// --- FACTORY ENGINE ---
 
 export class FactoryEngine {
   private static botInstances = new Map<string, Bot<FactoryContext>>();
@@ -28,7 +77,6 @@ export class FactoryEngine {
 
     const bot = this.getBotInstance(botId, token);
     
-    // Inject custom properties into update for middleware
     (update as any).env = env;
     (update as any).botId = botId;
 
@@ -75,12 +123,15 @@ export class FactoryEngine {
         });
       } catch (e) {}
 
-      await ctx.reply(config.welcome_message, {
+      // AEO: Semantic hierarchy using HTML
+      const header = `<b>[ TITANIUM CORE ACTIVATED ]</b>\n\n`;
+      const footer = `\n\n<i>Sistema operativo. Esperando parámetros.</i>`;
+
+      await ctx.reply(`${header}${config.welcome_message}${footer}`, {
         parse_mode: "HTML",
         reply_markup: keyboard,
       });
 
-      // Persistent Reply Keyboard
       const replyKeyboard = {
         keyboard: [] as any[],
         resize_keyboard: true,
@@ -93,14 +144,14 @@ export class FactoryEngine {
       } catch (e) {}
 
       if (replyKeyboard.keyboard.length > 0) {
-        await ctx.reply("Acceso directo al menú:", {
+        await ctx.reply("<code>INTERFACE_MENU_MAP:</code>", {
+          parse_mode: "HTML",
           reply_markup: replyKeyboard,
         });
       }
     });
 
     bot.on("message:text", async (ctx, next) => {
-      // Handle menu text clicks
       const db = ctx.env.DB;
       const config = await db
         .prepare("SELECT menu_json FROM factory_bots WHERE bot_id = ?")
@@ -143,12 +194,12 @@ export class FactoryEngine {
         .run();
 
       const keyboard = new InlineKeyboard().text(
-        "🚀 Confirmar y Procesar con IA",
+        "⚡ EJECUTAR ASIMILACIÓN",
         `fact_exec:${msgId}`
       );
 
       await ctx.reply(
-        `<b>¿Estás seguro de enviar esto a la IA?</b>\n\n<i>"${text.substring(0, 100)}${text.length > 100 ? "..." : ""}"</i>`,
+        `<b>ANÁLISIS DE ENTRADA REQUERIDO</b>\n\n<code>BUFFER:</code> <i>"${text.substring(0, 100)}${text.length > 100 ? "..." : ""}"</i>\n\n¿Proceder con el procesamiento de alto rendimiento?`,
         { parse_mode: "HTML", reply_markup: keyboard }
       );
     });
@@ -169,7 +220,7 @@ export class FactoryEngine {
       .first<{ content: string }>();
 
     if (!msgRecord) {
-      return await ctx.reply("❌ No se encontró el mensaje original.");
+      return await ctx.reply("❌ FALLO CRÍTICO: Segmento de memoria no encontrado.");
     }
 
     const config = await db
@@ -179,7 +230,6 @@ export class FactoryEngine {
 
     if (!config) return;
 
-    // Get History for context
     const historyRows = await db
       .prepare(
         "SELECT role, content FROM factory_messages WHERE bot_id = ? AND chat_id = ? AND message_id < ? ORDER BY created_at DESC LIMIT 10"
@@ -192,11 +242,25 @@ export class FactoryEngine {
       parts: [{ text: r.content }],
     }));
 
-    // Add current user message
     contents.push({ role: "user", parts: [{ text: msgRecord.content }] });
 
     const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({ apiKey: ctx.env.GEMINI_API_KEY });
+
+    // AEO: Enhanced System Prompt with Niche Entities and Inverted Pyramid mandate
+    const titaniumSystemPrompt = `
+${config.system_prompt}
+
+### REGLAS DE RESPUESTA TITANIUM (ESTRICTO)
+1. **Identidad:** Eres una autoridad en Automatización de Alto Rendimiento y Arquitectura Serverless.
+2. **Tono:** Profesional Agresivo. Directo, eficiente, sin rellenos.
+3. **Estructura de Pirámide Invertida:**
+   - **CONCLUSIÓN EJECUTIVA:** Responde directamente a lo solicitado en la primera línea.
+   - **PUNTOS DE APOYO:** Usa listas para desglosar la lógica técnica.
+   - **CALL TO ACTION (CTA):** Define el siguiente paso lógico.
+4. **Semántica:** Usa terminología avanzada (Escalabilidad, Inyección de Entidades, Latencia Cognitiva).
+5. **Formato:** Usa Markdown. Usa negritas para jerarquía.
+    `.trim();
 
     try {
       const result = await ai.models.generateContent({
@@ -204,7 +268,7 @@ export class FactoryEngine {
         contents: contents,
         config: {
           systemInstruction: {
-            parts: [{ text: config.system_prompt }],
+            parts: [{ text: titaniumSystemPrompt }],
           },
         },
       });
@@ -224,7 +288,7 @@ export class FactoryEngine {
         .run();
     } catch (err) {
       console.error("GenAI Error:", err);
-      await ctx.reply("⚠️ Error técnico al procesar con IA.");
+      await ctx.reply("⚠️ ERROR TÉCNICO: Interrupción en el flujo de IA.");
     }
   }
 
@@ -239,12 +303,13 @@ export class FactoryEngine {
 
     if (sequences.results && sequences.results.length > 0) {
       for (const step of sequences.results) {
-        await ctx.reply(`<b>${step.title}</b>\n\n${step.description}`, {
+        const header = `<b>[ SECUENCIA: ${step.title.toUpperCase()} ]</b>\n\n`;
+        await ctx.reply(`${header}${step.description}`, {
           parse_mode: "HTML",
         });
       }
     } else {
-      await ctx.reply("Acción no definida o sin pasos.");
+      await ctx.reply("<code>ESTADO: ACCIÓN NO DEFINIDA</code>");
     }
   }
 }
