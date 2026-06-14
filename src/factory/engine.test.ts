@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { FactoryEngine, CoreEnv, FactoryContext } from "./engine";
-import { GoogleGenAI } from "@google/genai";
+import { CoreEnv, FactoryContext } from "./types";
+import { handleAction, handleConfirmAndProcess } from "./handlers";
 
 const mockGenerateContent = vi.fn().mockResolvedValue({
   text: "MOCKED_AI_RESPONSE",
@@ -17,7 +17,7 @@ vi.mock("@google/genai", () => {
   };
 });
 
-describe("FactoryEngine Business Logic", () => {
+describe("FactoryEngine Handlers Business Logic", () => {
   const mockDb = {
     prepare: vi.fn().mockReturnThis(),
     bind: vi.fn().mockReturnThis(),
@@ -52,18 +52,21 @@ describe("FactoryEngine Business Logic", () => {
       ];
       mockDb.all.mockResolvedValueOnce({ results: sequences });
 
-      await (FactoryEngine as any).handleAction(mockCtx, "ACT");
+      await handleAction(mockCtx, "ACT");
 
       expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("FROM factory_sequences"));
       expect(mockDb.bind).toHaveBeenCalledWith("bot123", "ACT");
       expect(mockCtx.reply).toHaveBeenCalledTimes(2);
-      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining("Step 1"), expect.anything());
+      expect(mockCtx.reply).toHaveBeenCalledWith(
+        expect.stringContaining("Step 1"),
+        expect.objectContaining({ parse_mode: "HTML" })
+      );
     });
 
     it("should reply with undefined state if no sequences found", async () => {
       mockDb.all.mockResolvedValueOnce({ results: [] });
 
-      await (FactoryEngine as any).handleAction(mockCtx, "UNKNOWN");
+      await handleAction(mockCtx, "UNKNOWN");
 
       expect(mockCtx.reply).toHaveBeenCalledWith(
         expect.stringContaining("ACCIÓN NO DEFINIDA")
@@ -82,16 +85,19 @@ describe("FactoryEngine Business Logic", () => {
       // Mock D1 run for saving model response
       mockDb.run.mockResolvedValueOnce({ success: true });
 
-      await (FactoryEngine as any).handleConfirmAndProcess(mockCtx, 123);
+      await handleConfirmAndProcess(mockCtx, 123);
 
-      expect(mockCtx.reply).toHaveBeenCalledWith("MOCKED_AI_RESPONSE", expect.anything());
+      expect(mockCtx.reply).toHaveBeenCalledWith(
+        "MOCKED_AI_RESPONSE",
+        expect.objectContaining({ parse_mode: "HTML" })
+      );
       expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO factory_messages"));
     });
 
     it("should handle missing message record", async () => {
       mockDb.first.mockResolvedValueOnce(null);
 
-      await (FactoryEngine as any).handleConfirmAndProcess(mockCtx, 999);
+      await handleConfirmAndProcess(mockCtx, 999);
 
       expect(mockCtx.reply).toHaveBeenCalledWith(
         expect.stringContaining("Segmento de memoria no encontrado.")
