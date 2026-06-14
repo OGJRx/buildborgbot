@@ -221,7 +221,22 @@ export class FactoryEngine {
   }
 
   private static async handleAction(ctx: FactoryContext, action: string) {
-    // Basic implementation, will be expanded in Task 8
-    await ctx.reply(`Acción recibida: ${action}`);
+    const db = ctx.env.DB;
+    const sequences = await db
+      .prepare(
+        "SELECT * FROM factory_sequences WHERE bot_id = ? AND title = ? ORDER BY step_number ASC"
+      )
+      .bind(ctx.botId, action)
+      .all<any>();
+
+    if (sequences.results && sequences.results.length > 0) {
+      for (const step of sequences.results) {
+        await ctx.reply(`<b>${step.title}</b>\n\n${step.description}`, {
+          parse_mode: "HTML",
+        });
+      }
+    } else {
+      await ctx.reply("Acción no definida o sin pasos.");
+    }
   }
 }
