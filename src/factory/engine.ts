@@ -1,4 +1,6 @@
 import { Bot, Context, InlineKeyboard } from "grammy";
+import { Update } from "grammy/types";
+import { z } from "zod";
 
 // --- TITANIUM CORE TYPES ---
 
@@ -7,12 +9,13 @@ export interface CoreEnv {
   GEMINI_API_KEY: string;
   AI_MODEL_NAME: string;
   TITANIUM_API_SECRET: string;
-  [key: string]: any;
+  // Option A: Specific property for bot tokens to avoid 'any' indexing on CoreEnv
+  BOT_TOKENS: Record<string, string | undefined>;
 }
 
 export interface BorgExecutionContext {
   traceId: string;
-  waitUntil: (promise: Promise<any>) => void;
+  waitUntil: (promise: Promise<unknown>) => void;
 }
 
 export interface FactoryBotConfig {
@@ -22,6 +25,7 @@ export interface FactoryBotConfig {
   system_prompt: string;
   welcome_message: string;
   menu_json: string;
+  webhook_secret_hash?: string;
 }
 
 export interface FactorySequence {
@@ -35,6 +39,15 @@ export type FactoryContext = Context & {
   env: CoreEnv;
   botId: string;
 };
+
+const MenuSchema = z.array(
+  z.object({
+    label: z.string(),
+    action: z.string(),
+  })
+);
+
+type Menu = z.infer<typeof MenuSchema>;
 
 // --- TITANIUM LOGGING ---
 
@@ -56,55 +69,48 @@ export class BorgLogger {
 // --- FACTORY ENGINE ---
 
 export class FactoryEngine {
-  private static botInstances = new Map<string, Bot<FactoryContext>>();
-
   static async handleUpdate(
     botId: string,
-    update: any,
+    update: Update,
     env: CoreEnv,
-    ctx: BorgExecutionContext
+    borgCtx: BorgExecutionContext
   ): Promise<Response> {
     const db = env.DB;
     const config = await db
-      .prepare("SELECT * FROM factory_bots WHERE bot_id = ?")
+      .prepare(
+        "SELECT bot_id, bot_name, token_var_name, system_prompt, welcome_message, menu_json, webhook_secret_hash FROM factory_bots WHERE bot_id = ?"
+      )
       .bind(botId)
       .first<FactoryBotConfig>();
 
     if (!config) return new Response("Bot not found", { status: 404 });
 
-    const token = env[config.token_var_name];
-    if (!token) return new Response(`Secret ${config.token_var_name} not found`, { status: 500 });
+    // Access tokens from the dedicated BOT_TOKENS property
+    const token = env.BOT_TOKENS[config.token_var_name];
+    if (!token) {
+      return new Response(`Secret ${config.token_var_name} not found`, { status: 500 });
+    }
 
-    const bot = this.getBotInstance(botId, token);
-    
-    (update as any).env = env;
-    (update as any).botId = botId;
+    const bot = new Bot<FactoryContext>(token);
+
+    bot.use(async (ctx, next) => {
+      ctx.env = env;
+      ctx.botId = botId;
+      await next();
+    });
+
+    this.setupBot(bot, borgCtx);
 
     try {
-      await bot.handleUpdate(update);
+      borgCtx.waitUntil(bot.handleUpdate(update));
     } catch (err) {
-      console.error(`Error in bot ${botId}:`, err);
+      console.error(`Error initiating bot ${botId} update:`, err);
     }
 
     return new Response("OK");
   }
 
-  private static getBotInstance(botId: string, token: string): Bot<FactoryContext> {
-    if (this.botInstances.has(botId)) return this.botInstances.get(botId)!;
-
-    const bot = new Bot<FactoryContext>(token);
-    bot.use(async (ctx, next) => {
-      ctx.env = (ctx.update as any).env;
-      ctx.botId = (ctx.update as any).botId;
-      await next();
-    });
-
-    this.setupBot(bot);
-    this.botInstances.set(botId, bot);
-    return bot;
-  }
-
-  private static setupBot(bot: Bot<FactoryContext>) {
+  private static setupBot(bot: Bot<FactoryContext>, borgCtx: BorgExecutionContext) {
     bot.command("start", async (ctx) => {
       const db = ctx.env.DB;
       const config = await db
@@ -115,15 +121,18 @@ export class FactoryEngine {
       if (!config) return;
 
       const keyboard = new InlineKeyboard();
+      let menu: Menu = [];
       try {
-        const menu = JSON.parse(config.menu_json);
-        menu.forEach((btn: any, i: number) => {
+        const parsed = JSON.parse(config.menu_json);
+        menu = MenuSchema.parse(parsed);
+        menu.forEach((btn, i) => {
           keyboard.text(btn.label, `fact_act:${btn.action}`);
           if (i % 2 === 1) keyboard.row();
         });
-      } catch (e) {}
+      } catch (e) {
+        console.error("Menu parsing error:", e);
+      }
 
-      // AEO: Semantic hierarchy using HTML
       const header = `<b>[ TITANIUM CORE ACTIVATED ]</b>\n\n`;
       const footer = `\n\n<i>Sistema operativo. Esperando parámetros.</i>`;
 
@@ -133,15 +142,13 @@ export class FactoryEngine {
       });
 
       const replyKeyboard = {
-        keyboard: [] as any[],
+        keyboard: [] as { text: string }[][],
         resize_keyboard: true,
       };
-      try {
-        const menu = JSON.parse(config.menu_json);
-        menu.forEach((btn: any) => {
-          replyKeyboard.keyboard.push([{ text: btn.label }]);
-        });
-      } catch (e) {}
+
+      menu.forEach((btn) => {
+        replyKeyboard.keyboard.push([{ text: btn.label }]);
+      });
 
       if (replyKeyboard.keyboard.length > 0) {
         await ctx.reply("<code>INTERFACE_MENU_MAP:</code>", {
@@ -152,15 +159,19 @@ export class FactoryEngine {
     });
 
     bot.on("message:text", async (ctx, next) => {
+      if (ctx.message.text.startsWith("/")) return await next();
+
       const db = ctx.env.DB;
       const config = await db
         .prepare("SELECT menu_json FROM factory_bots WHERE bot_id = ?")
         .bind(ctx.botId)
         .first<{ menu_json: string }>();
+
       if (config) {
         try {
-          const menu = JSON.parse(config.menu_json);
-          const match = menu.find((btn: any) => btn.label === ctx.message.text);
+          const parsed = JSON.parse(config.menu_json);
+          const menu = MenuSchema.parse(parsed);
+          const match = menu.find((btn) => btn.label === ctx.message.text);
           if (match) {
             return await this.handleAction(ctx, match.action);
           }
@@ -173,19 +184,22 @@ export class FactoryEngine {
       const data = ctx.callbackQuery.data;
       if (data.startsWith("fact_act:")) {
         const action = data.split(":")[1];
-        await this.handleAction(ctx, action);
+        if (action) await this.handleAction(ctx, action);
       } else if (data.startsWith("fact_exec:")) {
-        const msgId = parseInt(data.split(":")[1], 10);
-        await this.handleConfirmAndProcess(ctx, msgId);
+        const msgIdStr = data.split(":")[1];
+        if (msgIdStr) {
+          const msgId = parseInt(msgIdStr, 10);
+          await this.handleConfirmAndProcess(ctx, msgId);
+        }
       }
       await ctx.answerCallbackQuery().catch(() => {});
     });
 
     bot.on("message:text", async (ctx) => {
-      if (ctx.message.text.startsWith("/")) return;
-
       const text = ctx.message.text;
       const msgId = ctx.message.message_id;
+
+      if (!ctx.chat) return;
 
       await ctx.env.DB.prepare(
         "INSERT INTO factory_messages (bot_id, chat_id, message_id, role, content) VALUES (?, ?, ?, ?, ?)"
@@ -208,9 +222,10 @@ export class FactoryEngine {
   }
 
   private static async handleConfirmAndProcess(ctx: FactoryContext, msgId: number) {
+    if (!ctx.chat) return;
     const db = ctx.env.DB;
     const botId = ctx.botId;
-    const chatId = String(ctx.chat?.id);
+    const chatId = String(ctx.chat.id);
 
     const msgRecord = await db
       .prepare(
@@ -247,7 +262,6 @@ export class FactoryEngine {
     const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({ apiKey: ctx.env.GEMINI_API_KEY });
 
-    // AEO: Enhanced System Prompt with Niche Entities and Inverted Pyramid mandate
     const titaniumSystemPrompt = `
 ${config.system_prompt}
 
@@ -259,7 +273,7 @@ ${config.system_prompt}
    - **PUNTOS DE APOYO:** Usa listas para desglosar la lógica técnica.
    - **CALL TO ACTION (CTA):** Define el siguiente paso lógico.
 4. **Semántica:** Usa terminología avanzada (Escalabilidad, Inyección de Entidades, Latencia Cognitiva).
-5. **Formato:** Usa Markdown. Usa negritas para jerarquía.
+5. **Formato:** Usa HTML. Usa negritas para jerarquía.
     `.trim();
 
     try {
@@ -279,13 +293,15 @@ ${config.system_prompt}
         throw new Error("No response text from Gemini");
       }
 
-      const sentMsg = await ctx.reply(responseText, { parse_mode: "Markdown" });
-      await db
-        .prepare(
-          "INSERT INTO factory_messages (bot_id, chat_id, message_id, role, content) VALUES (?, ?, ?, ?, ?)"
-        )
-        .bind(botId, chatId, sentMsg.message_id, "model", responseText)
-        .run();
+      const sentMsg = await ctx.reply(responseText, { parse_mode: "HTML" });
+      if (ctx.chat) {
+        await db
+          .prepare(
+            "INSERT INTO factory_messages (bot_id, chat_id, message_id, role, content) VALUES (?, ?, ?, ?, ?)"
+          )
+          .bind(botId, String(ctx.chat.id), sentMsg.message_id, "model", responseText)
+          .run();
+      }
     } catch (err) {
       console.error("GenAI Error:", err);
       await ctx.reply("⚠️ ERROR TÉCNICO: Interrupción en el flujo de IA.");
@@ -296,10 +312,10 @@ ${config.system_prompt}
     const db = ctx.env.DB;
     const sequences = await db
       .prepare(
-        "SELECT * FROM factory_sequences WHERE bot_id = ? AND title = ? ORDER BY step_number ASC"
+        "SELECT step_number, title, description, payload_json FROM factory_sequences WHERE bot_id = ? AND title = ? ORDER BY step_number ASC"
       )
       .bind(ctx.botId, action)
-      .all<any>();
+      .all<FactorySequence>();
 
     if (sequences.results && sequences.results.length > 0) {
       for (const step of sequences.results) {
