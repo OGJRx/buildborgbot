@@ -1,5 +1,4 @@
-import { FactoryEngine } from "./factory/engine";
-import { CoreEnv, BorgExecutionContext } from "./shared/types";
+import { FactoryEngine, CoreEnv, BorgExecutionContext } from "./factory/engine";
 
 export default {
   async fetch(request: Request, env: CoreEnv, ctx: ExecutionContext): Promise<Response> {
