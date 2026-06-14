@@ -1,6 +1,7 @@
 import { Bot, Context, InlineKeyboard } from "grammy";
 import { Update } from "grammy/types";
 import { z } from "zod";
+import { GoogleGenAI } from "@google/genai";
 
 // --- TITANIUM CORE TYPES ---
 
@@ -101,11 +102,7 @@ export class FactoryEngine {
 
     this.setupBot(bot, borgCtx);
 
-    try {
-      borgCtx.waitUntil(bot.handleUpdate(update));
-    } catch (err) {
-      console.error(`Error initiating bot ${botId} update:`, err);
-    }
+    borgCtx.waitUntil(bot.handleUpdate(update));
 
     return new Response("OK");
   }
@@ -175,7 +172,9 @@ export class FactoryEngine {
           if (match) {
             return await this.handleAction(ctx, match.action);
           }
-        } catch (e) {}
+        } catch (e) {
+          console.error("Menu match parse error:", e);
+        }
       }
       await next();
     });
@@ -259,7 +258,6 @@ export class FactoryEngine {
 
     contents.push({ role: "user", parts: [{ text: msgRecord.content }] });
 
-    const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({ apiKey: ctx.env.GEMINI_API_KEY });
 
     const titaniumSystemPrompt = `
