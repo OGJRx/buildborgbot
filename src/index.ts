@@ -1,4 +1,5 @@
 import { FactoryEngine, CoreEnv, BorgExecutionContext } from "./factory/engine";
+import { GoogleGenAI } from "@google/genai";
 import { Update } from "grammy/types";
 import { z } from "zod";
 
@@ -13,6 +14,20 @@ const ConfigSchema = z.object({
 });
 
 const PatchConfigSchema = ConfigSchema.partial().omit({ bot_id: true });
+
+const SummarizeSchema = z.object({
+  bot_id: z.string(),
+  chat_id: z.string(),
+  mode: z.enum(["ai", "manual"]),
+  manual_summary: z.string().optional(),
+});
+
+const MemoryQuerySchema = z.object({
+  bot_id: z.string(),
+  chat_id: z.string(),
+  cursor: z.coerce.number().optional(),
+  limit: z.coerce.number().min(1).max(100).default(50),
+});
 
 const SequenceSchema = z.object({
   bot_id: z.string(),
@@ -33,7 +48,6 @@ export default {
   async fetch(request: Request, env: CoreEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const borgCtx: BorgExecutionContext = {
-      traceId: crypto.randomUUID(),
       waitUntil: ctx.waitUntil.bind(ctx),
     };
 
@@ -95,32 +109,95 @@ export default {
         return new Response("Unauthorized", { status: 401 });
       }
 
-      const botId = url.searchParams.get("bot_id");
-      const chatId = url.searchParams.get("chat_id");
-
       if (request.method === "GET") {
-        if (!botId || !chatId) {
-          return Response.json({ error: "bot_id and chat_id required" }, { status: 400 });
+        const params = Object.fromEntries(url.searchParams);
+        const { bot_id, chat_id, cursor, limit } = MemoryQuerySchema.parse(params);
+
+        let query = "SELECT bot_id, chat_id, message_id, role, content, created_at FROM factory_messages WHERE bot_id = ? AND chat_id = ?";
+        const bindings: (string | number)[] = [bot_id, chat_id];
+
+        if (cursor !== undefined) {
+          query += " AND message_id < ?";
+          bindings.push(cursor);
         }
-        const messages = await env.DB.prepare(
-          "SELECT bot_id, chat_id, message_id, role, content, created_at FROM factory_messages WHERE bot_id = ? AND chat_id = ? ORDER BY created_at DESC LIMIT 50"
-        )
-          .bind(botId, chatId)
-          .all();
-        return Response.json(messages.results);
+
+        query += " ORDER BY message_id DESC LIMIT ?";
+        bindings.push(limit + 1);
+
+        const messages = await env.DB.prepare(query).bind(...bindings).all<{ message_id: number }>();
+        const results = messages.results || [];
+        const hasMore = results.length > limit;
+        if (hasMore) results.pop();
+
+        const lastItem = results[results.length - 1];
+        const nextCursor = hasMore && lastItem ? lastItem.message_id : null;
+
+        return Response.json({ results, hasMore, nextCursor });
       }
 
       if (request.method === "DELETE") {
+        const botId = url.searchParams.get("bot_id");
+        const chatId = url.searchParams.get("chat_id");
+        const includeSummary = url.searchParams.get("include_summary") === "true";
+
         if (!botId || !chatId) {
           return Response.json({ error: "bot_id and chat_id required" }, { status: 400 });
         }
-        await env.DB.prepare(
-          "DELETE FROM factory_messages WHERE bot_id = ? AND chat_id = ?"
-        )
-          .bind(botId, chatId)
-          .run();
+
+        let query = "DELETE FROM factory_messages WHERE bot_id = ? AND chat_id = ?";
+        if (!includeSummary) {
+          query += " AND message_id != 0";
+        }
+
+        await env.DB.prepare(query).bind(botId, chatId).run();
         return Response.json({ success: true });
       }
+    }
+
+    // Summarize API
+    if (url.pathname === "/api/factory/memory/summarize" && request.method === "POST") {
+      if (request.headers.get("x-titanium-api-secret") !== env.TITANIUM_API_SECRET) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+
+      const body = await request.json();
+      const { bot_id, chat_id, mode, manual_summary } = SummarizeSchema.parse(body);
+
+      let summary = "";
+
+      if (mode === "ai") {
+        const historyRows = await env.DB.prepare(
+          "SELECT role, content FROM factory_messages WHERE bot_id = ? AND chat_id = ? ORDER BY message_id ASC"
+        )
+          .bind(bot_id, chat_id)
+          .all<{ role: string; content: string }>();
+
+        const fullText = (historyRows.results || [])
+          .map((r) => `${r.role === "model" ? "Asistente" : "Usuario"}: ${r.content}`)
+          .join("\n\n");
+
+        const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+        const result = await ai.models.generateContent({
+          model: env.AI_MODEL_NAME,
+          contents: [{
+            role: "user",
+            parts: [{ text: `Resume la siguiente conversación en máximo 500 palabras, preservando datos críticos, decisiones tomadas y contexto relevante. Formato: texto plano.\n\nCONVERSACIÓN:\n${fullText}` }]
+          }]
+        });
+        summary = result.text || "";
+      } else {
+        if (!manual_summary) return Response.json({ error: "manual_summary required for manual mode" }, { status: 400 });
+        summary = manual_summary;
+      }
+
+      if (!summary) return Response.json({ error: "Failed to generate summary" }, { status: 500 });
+
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM factory_messages WHERE bot_id = ? AND chat_id = ?").bind(bot_id, chat_id),
+        env.DB.prepare("INSERT INTO factory_messages (bot_id, chat_id, message_id, role, content) VALUES (?, ?, 0, 'model', ?)").bind(bot_id, chat_id, summary)
+      ]);
+
+      return Response.json({ success: true, summary });
     }
 
     // Sequences API
@@ -188,7 +265,7 @@ export default {
         const validated = PatchConfigSchema.parse(body);
 
         const updates: string[] = [];
-        const values: any[] = [];
+        const values: (string | undefined)[] = [];
 
         Object.entries(validated).forEach(([key, value]) => {
           if (value !== undefined) {

@@ -1,4 +1,5 @@
-import { Context } from "grammy";
+import { Context, SessionFlavor } from "grammy";
+import { ConversationFlavor } from "@grammyjs/conversations";
 import { z } from "zod";
 
 export interface CoreEnv {
@@ -10,7 +11,6 @@ export interface CoreEnv {
 }
 
 export interface BorgExecutionContext {
-  traceId: string;
   waitUntil: (promise: Promise<unknown>) => void;
 }
 
@@ -31,10 +31,12 @@ export interface FactorySequence {
   payload_json: string;
 }
 
-export type FactoryContext = Context & {
-  env: CoreEnv;
-  botId: string;
-};
+export type FactoryContext = Context &
+  SessionFlavor<Record<string, unknown>> &
+  ConversationFlavor<Context & SessionFlavor<Record<string, unknown>>> & {
+    env: CoreEnv;
+    botId: string;
+  };
 
 export const MenuSchema = z.array(
   z.object({
