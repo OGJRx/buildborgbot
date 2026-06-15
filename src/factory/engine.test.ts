@@ -1,6 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { CoreEnv, FactoryContext } from "./types";
-import { handleAction, handleConfirmAndProcess, handleSummarize } from "./handlers";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  handleAction,
+  handleConfirmAndProcess,
+  handleSummarize,
+} from "./handlers";
+import type { CoreEnv, FactoryContext } from "./types";
 
 const mockGenerateContent = vi.fn().mockResolvedValue({
   text: "MOCKED_AI_RESPONSE",
@@ -51,19 +55,31 @@ describe("FactoryEngine Handlers Business Logic", () => {
   describe("handleAction", () => {
     it("should reply with sequence steps if they exist", async () => {
       const sequences = [
-        { step_number: 1, title: "ACT", description: "Step 1", payload_json: "{}" },
-        { step_number: 2, title: "ACT", description: "Step 2", payload_json: "{}" },
+        {
+          step_number: 1,
+          title: "ACT",
+          description: "Step 1",
+          payload_json: "{}",
+        },
+        {
+          step_number: 2,
+          title: "ACT",
+          description: "Step 2",
+          payload_json: "{}",
+        },
       ];
       mockDb.all.mockResolvedValueOnce({ results: sequences });
 
       await handleAction(mockCtx, "ACT");
 
-      expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("FROM factory_sequences"));
+      expect(mockDb.prepare).toHaveBeenCalledWith(
+        expect.stringContaining("FROM factory_sequences"),
+      );
       expect(mockDb.bind).toHaveBeenCalledWith("bot123", "ACT");
       expect(mockCtx.reply).toHaveBeenCalledTimes(2);
       expect(mockCtx.reply).toHaveBeenCalledWith(
         expect.stringContaining("Step 1"),
-        expect.objectContaining({ parse_mode: "HTML" })
+        expect.objectContaining({ parse_mode: "HTML" }),
       );
     });
 
@@ -73,14 +89,16 @@ describe("FactoryEngine Handlers Business Logic", () => {
       await handleAction(mockCtx, "UNKNOWN");
 
       expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining("Acción no definida.")
+        expect.stringContaining("Acción no definida."),
       );
     });
 
     it("should enter feedback conversation directly for 'feedback' action", async () => {
       await handleAction(mockCtx, "feedback");
 
-      expect(mockCtx.conversation.enter).toHaveBeenCalledWith("feedbackConversation");
+      expect(mockCtx.conversation.enter).toHaveBeenCalledWith(
+        "feedbackConversation",
+      );
       expect(mockDb.prepare).not.toHaveBeenCalled();
     });
   });
@@ -92,7 +110,9 @@ describe("FactoryEngine Handlers Business Logic", () => {
       // Mock system prompt retrieval
       mockDb.first.mockResolvedValueOnce({ system_prompt: "Be helpful" });
       // Mock history retrieval
-      mockDb.all.mockResolvedValueOnce({ results: [{ role: "user", content: "Prev msg" }] });
+      mockDb.all.mockResolvedValueOnce({
+        results: [{ role: "user", content: "Prev msg" }],
+      });
       // Mock D1 run for saving model response
       mockDb.run.mockResolvedValueOnce({ success: true });
 
@@ -100,9 +120,11 @@ describe("FactoryEngine Handlers Business Logic", () => {
 
       expect(mockCtx.reply).toHaveBeenCalledWith(
         "MOCKED_AI_RESPONSE",
-        expect.objectContaining({ parse_mode: "HTML" })
+        expect.objectContaining({ parse_mode: "HTML" }),
       );
-      expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO factory_messages"));
+      expect(mockDb.prepare).toHaveBeenCalledWith(
+        expect.stringContaining("INSERT INTO factory_messages"),
+      );
     });
 
     it("should handle missing message record", async () => {
@@ -111,7 +133,7 @@ describe("FactoryEngine Handlers Business Logic", () => {
       await handleConfirmAndProcess(mockCtx, 999);
 
       expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining("Segmento de memoria no encontrado.")
+        expect.stringContaining("Segmento de memoria no encontrado."),
       );
     });
 
@@ -131,7 +153,7 @@ describe("FactoryEngine Handlers Business Logic", () => {
 
       expect(mockCtx.reply).toHaveBeenCalledWith(
         expect.stringContaining("ALERTA DE CAPACIDAD"),
-        expect.objectContaining({ reply_markup: expect.anything() })
+        expect.objectContaining({ reply_markup: expect.anything() }),
       );
       expect(mockGenerateContent).toHaveBeenCalledTimes(0);
     });
@@ -152,7 +174,7 @@ describe("FactoryEngine Handlers Business Logic", () => {
 
       expect(mockCtx.reply).toHaveBeenCalledWith(
         expect.stringContaining("Procesando resumen"),
-        expect.anything()
+        expect.anything(),
       );
       expect(mockGenerateContent).toHaveBeenCalled();
       expect(mockDb.batch).toHaveBeenCalledWith([
@@ -161,7 +183,7 @@ describe("FactoryEngine Handlers Business Logic", () => {
       ]);
       expect(mockCtx.reply).toHaveBeenCalledWith(
         expect.stringContaining("MEMORIA OPTIMIZADA"),
-        expect.anything()
+        expect.anything(),
       );
     });
   });

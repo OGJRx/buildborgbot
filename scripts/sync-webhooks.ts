@@ -1,4 +1,4 @@
-import { FactoryBotConfig } from "../src/factory/types";
+import type { FactoryBotConfig } from "../src/factory/types";
 
 async function hashSecret(secret: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -11,7 +11,9 @@ async function hashSecret(secret: string): Promise<string> {
 async function sync() {
   const { WORKER_URL, TITANIUM_API_SECRET } = process.env;
   if (!WORKER_URL || !TITANIUM_API_SECRET) {
-    throw new Error("Missing WORKER_URL or TITANIUM_API_SECRET in environment variables");
+    throw new Error(
+      "Missing WORKER_URL or TITANIUM_API_SECRET in environment variables",
+    );
   }
 
   console.log(`Fetching bots from ${WORKER_URL}...`);
@@ -29,7 +31,9 @@ async function sync() {
   for (const bot of bots) {
     const token = process.env[bot.token_var_name];
     if (!token) {
-      console.warn(`Warning: Token environment variable '${bot.token_var_name}' not found for bot '${bot.bot_id}'`);
+      console.warn(
+        `Warning: Token environment variable '${bot.token_var_name}' not found for bot '${bot.bot_id}'`,
+      );
       continue;
     }
 
@@ -51,21 +55,27 @@ async function sync() {
     });
 
     if (!configUpdateRes.ok) {
-      throw new Error(`Failed to update config for ${bot.bot_id}: ${configUpdateRes.statusText}`);
+      throw new Error(
+        `Failed to update config for ${bot.bot_id}: ${configUpdateRes.statusText}`,
+      );
     }
 
     // 2. Set Webhook in Telegram with the secret
     const webhookUrl = `${WORKER_URL}/webhook/factory/${bot.bot_id}`;
     const telegramUrl = `https://api.telegram.org/bot${token}/setWebhook?url=${encodeURIComponent(
-      webhookUrl
+      webhookUrl,
     )}&secret_token=${webhookSecret}`;
 
-    console.log(`Setting webhook for ${bot.bot_id} to ${webhookUrl} (with secret)...`);
+    console.log(
+      `Setting webhook for ${bot.bot_id} to ${webhookUrl} (with secret)...`,
+    );
     const res = await fetch(telegramUrl);
     const data = (await res.json()) as { ok: boolean; description?: string };
 
     if (!data.ok) {
-      throw new Error(`Critical Error: Failed to set webhook for ${bot.bot_id}: ${data.description}`);
+      throw new Error(
+        `Critical Error: Failed to set webhook for ${bot.bot_id}: ${data.description}`,
+      );
     }
     console.log(`Webhook set successfully for ${bot.bot_id}`);
   }

@@ -1,6 +1,7 @@
-import { Context, SessionFlavor } from "grammy";
-import { ConversationFlavor } from "@grammyjs/conversations";
-import { z } from "zod";
+import type { ConversationFlavor } from "@grammyjs/conversations";
+import type { Context, SessionFlavor } from "grammy";
+import type { z } from "zod";
+import type { MenuSchema } from "./schemas";
 
 export interface CoreEnv {
   DB: D1Database;
@@ -8,10 +9,6 @@ export interface CoreEnv {
   AI_MODEL_NAME: string;
   TITANIUM_API_SECRET: string;
   BOT_TOKENS: Record<string, string | undefined>;
-}
-
-export interface BorgExecutionContext {
-  waitUntil: (promise: Promise<unknown>) => void;
 }
 
 export interface FactoryBotConfig {
@@ -37,12 +34,5 @@ export type FactoryContext = Context &
     env: CoreEnv;
     botId: string;
   };
-
-export const MenuSchema = z.array(
-  z.object({
-    label: z.string(),
-    action: z.string(),
-  })
-);
 
 export type Menu = z.infer<typeof MenuSchema>;
