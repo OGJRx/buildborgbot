@@ -1,4 +1,6 @@
-import { Bot, InlineKeyboard } from "grammy";
+import { Bot, InlineKeyboard, session } from "grammy";
+import { D1Adapter } from "@grammyjs/storage-cloudflare";
+import { conversations, createConversation } from "@grammyjs/conversations";
 import { Update } from "grammy/types";
 import {
   CoreEnv,
@@ -8,7 +10,8 @@ import {
   MenuSchema,
   Menu,
 } from "./types";
-import { handleAction, handleConfirmAndProcess } from "./handlers";
+import { handleAction, handleConfirmAndProcess, handleSummarize } from "./handlers";
+import { feedbackConversation } from "./conversations";
 
 // --- FACTORY ENGINE ---
 
@@ -42,14 +45,38 @@ export class FactoryEngine {
       await next();
     });
 
-    this.setupBot(bot, borgCtx);
+    const storage = await D1Adapter.create<unknown>(db, "factory_sessions");
+
+    bot.use(
+      session({
+        initial: () => ({}),
+        storage: storage as unknown as any,
+        getSessionKey: (ctx) => {
+          const chatId = ctx.chat?.id.toString() ?? "unknown";
+          return `${chatId}:${ctx.botId}`;
+        },
+      })
+    );
+
+    bot.use(
+      conversations({
+        storage: storage as unknown as any,
+      })
+    );
+
+    this.setupBot(bot, borgCtx.waitUntil);
 
     borgCtx.waitUntil(bot.handleUpdate(update));
 
     return new Response("OK");
   }
 
-  private static setupBot(bot: Bot<FactoryContext>, borgCtx: BorgExecutionContext) {
+  private static setupBot(
+    bot: Bot<FactoryContext>,
+    waitUntil: (p: Promise<unknown>) => void
+  ) {
+    bot.use(createConversation(feedbackConversation));
+
     bot.command("start", async (ctx) => {
       const db = ctx.env.DB;
       const config = await db
@@ -129,8 +156,14 @@ export class FactoryEngine {
           const msgId = parseInt(msgIdStr, 10);
           await handleConfirmAndProcess(ctx, msgId);
         }
+      } else if (data === "fact_summarize") {
+        await handleSummarize(ctx);
       }
-      await ctx.answerCallbackQuery().catch(() => {});
+      await ctx.answerCallbackQuery().catch((err: unknown) => {
+        console.error(
+          `[CALLBACK_QUERY_ERROR] bot=${ctx.botId} chat=${ctx.chat?.id} err=${String(err)}`
+        );
+      });
     });
 
     bot.on("message:text", async (ctx) => {
