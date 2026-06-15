@@ -1,6 +1,11 @@
-import { Bot, InlineKeyboard, session } from "grammy";
+import { Bot, InlineKeyboard, session, StorageAdapter, type Context } from "grammy";
 import { D1Adapter } from "@grammyjs/storage-cloudflare";
-import { conversations, createConversation } from "@grammyjs/conversations";
+import {
+  conversations,
+  createConversation,
+  type ConversationData,
+  type VersionedState
+} from "@grammyjs/conversations";
 import { Update } from "grammy/types";
 import {
   CoreEnv,
@@ -45,12 +50,18 @@ export class FactoryEngine {
       await next();
     });
 
-    const storage = await D1Adapter.create<unknown>(db, "factory_sessions");
+    // Session storage
+    const sessionRaw = await D1Adapter.create<Record<string, unknown>>(db, "factory_sessions");
+    const sessionAdapter: StorageAdapter<Record<string, unknown>> = {
+      read: (key) => sessionRaw.read(key),
+      write: (key, value) => sessionRaw.write(key, value),
+      delete: (key) => sessionRaw.delete(key),
+    };
 
     bot.use(
       session({
         initial: () => ({}),
-        storage: storage as unknown as any,
+        storage: sessionAdapter,
         getSessionKey: (ctx) => {
           const chatId = ctx.chat?.id.toString() ?? "unknown";
           return `${chatId}:${ctx.botId}`;
@@ -58,9 +69,22 @@ export class FactoryEngine {
       })
     );
 
+    // Conversation storage
+    const convoRaw = await D1Adapter.create<VersionedState<ConversationData>>(db, "factory_sessions");
     bot.use(
       conversations({
-        storage: storage as unknown as any,
+        storage: {
+          type: "key",
+          adapter: {
+            read: (key) => convoRaw.read(key),
+            write: (key, value) => convoRaw.write(key, value),
+            delete: (key) => convoRaw.delete(key),
+          },
+          getStorageKey: (ctx: Context & { botId: string }) => {
+            const chatId = ctx.chat?.id.toString() ?? "unknown";
+            return `${chatId}:${ctx.botId}`;
+          },
+        },
       })
     );
 
@@ -104,8 +128,11 @@ export class FactoryEngine {
         reply_markup: keyboard,
       });
 
-      const replyKeyboard = {
-        keyboard: [] as { text: string }[][],
+      const replyKeyboard: {
+        keyboard: { text: string }[][];
+        resize_keyboard: boolean;
+      } = {
+        keyboard: [],
         resize_keyboard: true,
       };
 

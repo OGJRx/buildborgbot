@@ -32,8 +32,8 @@ export interface FactorySequence {
 }
 
 export type FactoryContext = Context &
-  SessionFlavor<Record<string, unknown>> &
-  ConversationFlavor<Context & SessionFlavor<Record<string, unknown>>> & {
+  SessionFlavor<Record<string, unknown>> & {
+    conversation: ConversationFlavor<Context>["conversation"];
     env: CoreEnv;
     botId: string;
   };

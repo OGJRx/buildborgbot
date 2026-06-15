@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { CoreEnv, FactoryContext } from "./types";
-import { handleAction, handleConfirmAndProcess } from "./handlers";
+import { handleAction, handleConfirmAndProcess, handleSummarize } from "./handlers";
 
 const mockGenerateContent = vi.fn().mockResolvedValue({
   text: "MOCKED_AI_RESPONSE",
@@ -24,6 +24,7 @@ describe("FactoryEngine Handlers Business Logic", () => {
     first: vi.fn(),
     all: vi.fn(),
     run: vi.fn(),
+    batch: vi.fn(),
   };
 
   const mockEnv = {
@@ -38,6 +39,9 @@ describe("FactoryEngine Handlers Business Logic", () => {
     botId: "bot123",
     chat: { id: 456 },
     reply: vi.fn().mockResolvedValue({ message_id: 789 }),
+    conversation: {
+      enter: vi.fn().mockResolvedValue(undefined),
+    },
   } as unknown as FactoryContext;
 
   beforeEach(() => {
@@ -72,6 +76,13 @@ describe("FactoryEngine Handlers Business Logic", () => {
         expect.stringContaining("Acción no definida.")
       );
     });
+
+    it("should enter feedback conversation directly for 'feedback' action", async () => {
+      await handleAction(mockCtx, "feedback");
+
+      expect(mockCtx.conversation.enter).toHaveBeenCalledWith("feedbackConversation");
+      expect(mockDb.prepare).not.toHaveBeenCalled();
+    });
   });
 
   describe("handleConfirmAndProcess", () => {
@@ -101,6 +112,56 @@ describe("FactoryEngine Handlers Business Logic", () => {
 
       expect(mockCtx.reply).toHaveBeenCalledWith(
         expect.stringContaining("Segmento de memoria no encontrado.")
+      );
+    });
+
+    it("should not call AI if budget is exceeded", async () => {
+      mockDb.first.mockResolvedValueOnce({ content: "User Input" });
+      mockDb.first.mockResolvedValueOnce({ system_prompt: "Be helpful" });
+
+      // Simulate heavy history to exceed budget
+      const heavyHistory = Array.from({ length: 50 }, (_, i) => ({
+        message_id: i + 1,
+        role: "user",
+        content: "A".repeat(1000),
+      }));
+      mockDb.all.mockResolvedValueOnce({ results: heavyHistory });
+
+      await handleConfirmAndProcess(mockCtx, 123);
+
+      expect(mockCtx.reply).toHaveBeenCalledWith(
+        expect.stringContaining("ALERTA DE CAPACIDAD"),
+        expect.objectContaining({ reply_markup: expect.anything() })
+      );
+      expect(mockGenerateContent).toHaveBeenCalledTimes(0);
+    });
+  });
+
+  describe("handleSummarize", () => {
+    it("should perform atomic batch operations for summarization", async () => {
+      mockDb.all.mockResolvedValueOnce({
+        results: [
+          { role: "user", content: "Hello" },
+          { role: "model", content: "Hi" },
+        ],
+      });
+      mockGenerateContent.mockResolvedValueOnce({ text: "SUMMARY_TEXT" });
+      mockDb.batch.mockResolvedValueOnce([]);
+
+      await handleSummarize(mockCtx);
+
+      expect(mockCtx.reply).toHaveBeenCalledWith(
+        expect.stringContaining("Procesando resumen"),
+        expect.anything()
+      );
+      expect(mockGenerateContent).toHaveBeenCalled();
+      expect(mockDb.batch).toHaveBeenCalledWith([
+        expect.anything(), // DELETE
+        expect.anything(), // INSERT message_id 0
+      ]);
+      expect(mockCtx.reply).toHaveBeenCalledWith(
+        expect.stringContaining("MEMORIA OPTIMIZADA"),
+        expect.anything()
       );
     });
   });
