@@ -12,6 +12,16 @@ const ConfigSchema = z.object({
   webhook_secret_hash: z.string().optional(),
 });
 
+const PatchConfigSchema = ConfigSchema.partial().omit({ bot_id: true });
+
+const SequenceSchema = z.object({
+  bot_id: z.string(),
+  step_number: z.number(),
+  title: z.string(),
+  description: z.string(),
+  payload_json: z.string(),
+});
+
 async function hashSecret(secret: string): Promise<string> {
   const msgUint8 = new TextEncoder().encode(secret);
   const hashBuffer = await crypto.subtle.digest("SHA-256", msgUint8);
@@ -80,21 +90,77 @@ export default {
     }
 
     // Memory API
-    if (url.pathname === "/api/factory/memory" && request.method === "GET") {
+    if (url.pathname === "/api/factory/memory") {
+      if (request.headers.get("x-titanium-api-secret") !== env.TITANIUM_API_SECRET) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+
       const botId = url.searchParams.get("bot_id");
       const chatId = url.searchParams.get("chat_id");
-      if (!botId || !chatId) {
-        return Response.json({ error: "bot_id and chat_id required" }, { status: 400 });
+
+      if (request.method === "GET") {
+        if (!botId || !chatId) {
+          return Response.json({ error: "bot_id and chat_id required" }, { status: 400 });
+        }
+        const messages = await env.DB.prepare(
+          "SELECT bot_id, chat_id, message_id, role, content, created_at FROM factory_messages WHERE bot_id = ? AND chat_id = ? ORDER BY created_at DESC LIMIT 50"
+        )
+          .bind(botId, chatId)
+          .all();
+        return Response.json(messages.results);
       }
-      const messages = await env.DB.prepare(
-        "SELECT bot_id, chat_id, message_id, role, content, created_at FROM factory_messages WHERE bot_id = ? AND chat_id = ? ORDER BY created_at DESC LIMIT 50"
-      )
-        .bind(botId, chatId)
-        .all();
-      return Response.json(messages.results);
+
+      if (request.method === "DELETE") {
+        if (!botId || !chatId) {
+          return Response.json({ error: "bot_id and chat_id required" }, { status: 400 });
+        }
+        await env.DB.prepare(
+          "DELETE FROM factory_messages WHERE bot_id = ? AND chat_id = ?"
+        )
+          .bind(botId, chatId)
+          .run();
+        return Response.json({ success: true });
+      }
     }
 
-    // List Bots API
+    // Sequences API
+    if (url.pathname === "/api/factory/sequences") {
+      if (request.headers.get("x-titanium-api-secret") !== env.TITANIUM_API_SECRET) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+
+      if (request.method === "GET") {
+        const botId = url.searchParams.get("bot_id");
+        if (!botId) return Response.json({ error: "bot_id required" }, { status: 400 });
+
+        const sequences = await env.DB.prepare(
+          "SELECT step_number, title, description, payload_json, created_at FROM factory_sequences WHERE bot_id = ? ORDER BY title ASC, step_number ASC"
+        )
+          .bind(botId)
+          .all();
+        return Response.json(sequences.results);
+      }
+
+      if (request.method === "POST") {
+        const body = await request.json();
+        const validated = SequenceSchema.parse(body);
+
+        await env.DB.prepare(
+          "INSERT INTO factory_sequences (bot_id, step_number, title, description, payload_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(bot_id, title, step_number) DO UPDATE SET description=excluded.description, payload_json=excluded.payload_json, created_at=CURRENT_TIMESTAMP"
+        )
+          .bind(
+            validated.bot_id,
+            validated.step_number,
+            validated.title,
+            validated.description,
+            validated.payload_json
+          )
+          .run();
+        return Response.json({ success: true });
+      }
+    }
+
+    // Bots API
     if (url.pathname === "/api/factory/bots" && request.method === "GET") {
       if (request.headers.get("x-titanium-api-secret") !== env.TITANIUM_API_SECRET) {
         return new Response("Unauthorized", { status: 401 });
@@ -103,6 +169,45 @@ export default {
         "SELECT bot_id, bot_name, token_var_name, system_prompt, welcome_message, menu_json FROM factory_bots"
       ).all();
       return Response.json(bots.results);
+    }
+
+    if (url.pathname.startsWith("/api/factory/bots/")) {
+      if (request.headers.get("x-titanium-api-secret") !== env.TITANIUM_API_SECRET) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      const botId = url.pathname.split("/")[4];
+      if (!botId) return new Response("bot_id required", { status: 400 });
+
+      if (request.method === "DELETE") {
+        await env.DB.prepare("DELETE FROM factory_bots WHERE bot_id = ?").bind(botId).run();
+        return Response.json({ success: true });
+      }
+
+      if (request.method === "PATCH") {
+        const body = await request.json();
+        const validated = PatchConfigSchema.parse(body);
+
+        const updates: string[] = [];
+        const values: any[] = [];
+
+        Object.entries(validated).forEach(([key, value]) => {
+          if (value !== undefined) {
+            updates.push(`${key} = ?`);
+            values.push(value);
+          }
+        });
+
+        if (updates.length === 0) return Response.json({ success: true });
+
+        values.push(botId);
+        await env.DB.prepare(
+          `UPDATE factory_bots SET ${updates.join(", ")}, updated_at=CURRENT_TIMESTAMP WHERE bot_id = ?`
+        )
+          .bind(...values)
+          .run();
+
+        return Response.json({ success: true });
+      }
     }
 
     return new Response("Not Found", { status: 404 });

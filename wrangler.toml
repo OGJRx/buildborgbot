@@ -2,6 +2,8 @@ name = "fabricaborgbots"
 main = "src/index.ts"
 compatibility_date = "2026-06-14"
 
+preview_urls = false
+
 [vars]
 AI_MODEL_NAME = "gemini-2.5-flash"
 

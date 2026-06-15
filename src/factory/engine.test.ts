@@ -69,7 +69,7 @@ describe("FactoryEngine Handlers Business Logic", () => {
       await handleAction(mockCtx, "UNKNOWN");
 
       expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining("ACCIÓN NO DEFINIDA")
+        expect.stringContaining("Acción no definida.")
       );
     });
   });
