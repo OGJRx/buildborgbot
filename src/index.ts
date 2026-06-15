@@ -74,7 +74,11 @@ export default {
         return new Response("Forbidden: Invalid secret", { status: 403 });
       }
 
-      const update = (await request.json()) as Update;
+      const body = await request.json();
+      if (typeof body !== "object" || body === null) {
+        return new Response("Invalid request body", { status: 400 });
+      }
+      const update = body as unknown as Update;
       return await FactoryEngine.handleUpdate(botId, update, env, borgCtx);
     }
 

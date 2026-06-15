@@ -143,6 +143,10 @@ export async function handleSummarize(ctx: FactoryContext) {
 }
 
 export async function handleAction(ctx: FactoryContext, action: string) {
+  if (action === "feedback") {
+    return await ctx.conversation.enter("feedbackConversation");
+  }
+
   const db = ctx.env.DB;
   const sequences = await db
     .prepare(
@@ -150,10 +154,6 @@ export async function handleAction(ctx: FactoryContext, action: string) {
     )
     .bind(ctx.botId, action)
     .all<FactorySequence>();
-
-  if (action === "feedback") {
-    return await ctx.conversation.enter("feedbackConversation");
-  }
 
   if (sequences.results && sequences.results.length > 0) {
     for (const step of sequences.results) {
