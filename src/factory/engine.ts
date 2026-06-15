@@ -1,22 +1,26 @@
-import { Bot, InlineKeyboard, session, StorageAdapter, type Context } from "grammy";
-import { D1Adapter } from "@grammyjs/storage-cloudflare";
 import {
+  type ConversationData,
   conversations,
   createConversation,
-  type ConversationData,
-  type VersionedState
+  type VersionedState,
 } from "@grammyjs/conversations";
-import { Update } from "grammy/types";
+import { D1Adapter } from "@grammyjs/storage-cloudflare";
 import {
-  CoreEnv,
-  BorgExecutionContext,
-  FactoryBotConfig,
-  FactoryContext,
-  MenuSchema,
-  Menu,
-} from "./types";
-import { handleAction, handleConfirmAndProcess, handleSummarize } from "./handlers";
+  Bot,
+  type Context,
+  InlineKeyboard,
+  type StorageAdapter,
+  session,
+} from "grammy";
+import type { Update } from "grammy/types";
 import { feedbackConversation } from "./conversations";
+import {
+  handleAction,
+  handleConfirmAndProcess,
+  handleSummarize,
+} from "./handlers";
+import { MenuSchema } from "./schemas";
+import type { CoreEnv, FactoryBotConfig, FactoryContext, Menu } from "./types";
 
 // --- FACTORY ENGINE ---
 
@@ -25,12 +29,12 @@ export class FactoryEngine {
     botId: string,
     update: Update,
     env: CoreEnv,
-    borgCtx: BorgExecutionContext
+    waitUntil: (promise: Promise<unknown>) => void,
   ): Promise<Response> {
     const db = env.DB;
     const config = await db
       .prepare(
-        "SELECT bot_id, bot_name, token_var_name, system_prompt, welcome_message, menu_json, webhook_secret_hash FROM factory_bots WHERE bot_id = ?"
+        "SELECT bot_id, bot_name, token_var_name, system_prompt, welcome_message, menu_json, webhook_secret_hash FROM factory_bots WHERE bot_id = ?",
       )
       .bind(botId)
       .first<FactoryBotConfig>();
@@ -51,7 +55,10 @@ export class FactoryEngine {
     });
 
     // Session storage
-    const sessionRaw = await D1Adapter.create<Record<string, unknown>>(db, "factory_sessions");
+    const sessionRaw = await D1Adapter.create<Record<string, unknown>>(
+      db,
+      "factory_sessions",
+    );
     const sessionAdapter: StorageAdapter<Record<string, unknown>> = {
       read: (key) => sessionRaw.read(key),
       write: (key, value) => sessionRaw.write(key, value),
@@ -66,11 +73,14 @@ export class FactoryEngine {
           const chatId = ctx.chat?.id.toString() ?? "unknown";
           return `${chatId}:${ctx.botId}`;
         },
-      })
+      }),
     );
 
     // Conversation storage
-    const convoRaw = await D1Adapter.create<VersionedState<ConversationData>>(db, "factory_sessions");
+    const convoRaw = await D1Adapter.create<VersionedState<ConversationData>>(
+      db,
+      "factory_sessions",
+    );
     bot.use(
       conversations({
         storage: {
@@ -85,26 +95,28 @@ export class FactoryEngine {
             return `${chatId}:${ctx.botId}`;
           },
         },
-      })
+      }),
     );
 
-    this.setupBot(bot, borgCtx.waitUntil);
+    FactoryEngine.setupBot(bot, waitUntil);
 
-    borgCtx.waitUntil(bot.handleUpdate(update));
+    waitUntil(bot.handleUpdate(update));
 
     return new Response("OK");
   }
 
   private static setupBot(
     bot: Bot<FactoryContext>,
-    waitUntil: (p: Promise<unknown>) => void
+    _waitUntil: (p: Promise<unknown>) => void,
   ) {
     bot.use(createConversation(feedbackConversation));
 
     bot.command("start", async (ctx) => {
       const db = ctx.env.DB;
       const config = await db
-        .prepare("SELECT welcome_message, menu_json FROM factory_bots WHERE bot_id = ?")
+        .prepare(
+          "SELECT welcome_message, menu_json FROM factory_bots WHERE bot_id = ?",
+        )
         .bind(ctx.botId)
         .first<{ welcome_message: string; menu_json: string }>();
 
@@ -188,7 +200,7 @@ export class FactoryEngine {
       }
       await ctx.answerCallbackQuery().catch((err: unknown) => {
         console.error(
-          `[CALLBACK_QUERY_ERROR] bot=${ctx.botId} chat=${ctx.chat?.id} err=${String(err)}`
+          `[CALLBACK_QUERY_ERROR] bot=${ctx.botId} chat=${ctx.chat?.id} err=${String(err)}`,
         );
       });
     });
@@ -200,19 +212,19 @@ export class FactoryEngine {
       if (!ctx.chat) return;
 
       await ctx.env.DB.prepare(
-        "INSERT INTO factory_messages (bot_id, chat_id, message_id, role, content) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO factory_messages (bot_id, chat_id, message_id, role, content) VALUES (?, ?, ?, ?, ?)",
       )
         .bind(ctx.botId, String(ctx.chat.id), msgId, "user", text)
         .run();
 
       const keyboard = new InlineKeyboard().text(
         "⚡ PROCESAR",
-        `fact_exec:${msgId}`
+        `fact_exec:${msgId}`,
       );
 
       await ctx.reply(
         `<b>ENTRADA RECIBIDA</b>\n\n<code>CONTENIDO:</code> <i>"${text.substring(0, 100)}${text.length > 100 ? "..." : ""}"</i>\n\n¿Desea procesar este mensaje con IA?`,
-        { parse_mode: "HTML", reply_markup: keyboard }
+        { parse_mode: "HTML", reply_markup: keyboard },
       );
     });
 
@@ -222,9 +234,7 @@ export class FactoryEngine {
 
 export {
   CoreEnv,
-  BorgExecutionContext,
   FactoryBotConfig,
   FactoryContext,
-  MenuSchema,
   Menu,
 } from "./types";

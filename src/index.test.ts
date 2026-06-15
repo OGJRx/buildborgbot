@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { type CoreEnv, FactoryEngine } from "./factory/engine";
 import worker from "./index";
-import { FactoryEngine, CoreEnv } from "./factory/engine";
 
 vi.mock("./factory/engine", () => ({
   FactoryEngine: {
@@ -96,7 +96,9 @@ describe("Worker Entry Point", () => {
 
     const response = await worker.fetch(request, mockEnv, mockCtx);
     expect(response.status).toBe(200);
-    expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("webhook_secret_hash"));
+    expect(mockDb.prepare).toHaveBeenCalledWith(
+      expect.stringContaining("webhook_secret_hash"),
+    );
     expect(mockDb.bind).toHaveBeenCalledWith(
       config.bot_id,
       config.bot_name,
@@ -104,7 +106,7 @@ describe("Worker Entry Point", () => {
       config.system_prompt,
       config.welcome_message,
       config.menu_json,
-      config.webhook_secret_hash
+      config.webhook_secret_hash,
     );
   });
 });

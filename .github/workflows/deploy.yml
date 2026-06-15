@@ -21,7 +21,9 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
-      - name: Run Lint
+      - name: Lint
+        run: npx biome check .
+      - name: Type Check
         run: npx tsc --noEmit
       - name: Run Tests
         run: npm test

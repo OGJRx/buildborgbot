@@ -22,7 +22,7 @@ export interface BudgetResult {
 export function buildBudgetedHistory(
   rawMessages: Array<{ message_id: number; role: string; content: string }>,
   systemPromptTokens: number,
-  maxBudget: number = MAX_TOKEN_BUDGET
+  maxBudget: number = MAX_TOKEN_BUDGET,
 ): BudgetResult {
   let summaryContext: string | null = null;
   const filteredMessages = rawMessages.filter((m) => {
@@ -42,7 +42,9 @@ export function buildBudgetedHistory(
   let requiresSummarization = false;
 
   // Iterar del más reciente al más viejo
-  const reversed = [...filteredMessages].sort((a, b) => b.message_id - a.message_id);
+  const reversed = [...filteredMessages].sort(
+    (a, b) => b.message_id - a.message_id,
+  );
 
   for (const msg of reversed) {
     const tokens = estimateTokens(msg.content);

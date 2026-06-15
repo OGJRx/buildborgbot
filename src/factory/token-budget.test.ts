@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { buildBudgetedHistory, estimateTokens } from "./token-budget";
+import { describe, expect, it } from "vitest";
+import { buildBudgetedHistory } from "./token-budget";
 
 describe("token-budget utility", () => {
   it("should detect and extract summaryContext (message_id = 0)", () => {
