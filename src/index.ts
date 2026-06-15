@@ -1,5 +1,5 @@
 import type { Update } from "grammy/types";
-import { type CoreEnv, FactoryEngine } from "./factory/engine";
+import { type CoreEnv, handleUpdate } from "./factory/engine";
 import {
   ConfigSchema,
   MemoryQuerySchema,
@@ -66,12 +66,7 @@ export default {
 
       const body = await request.json();
       const update = TelegramUpdateSchema.parse(body) as Update;
-      return await FactoryEngine.handleUpdate(
-        botId,
-        update,
-        env,
-        ctx.waitUntil.bind(ctx),
-      );
+      return await handleUpdate(botId, update, env, ctx.waitUntil.bind(ctx));
     }
 
     // Config API

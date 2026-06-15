@@ -21,7 +21,7 @@ vi.mock("@google/genai", () => {
   };
 });
 
-describe("FactoryEngine Handlers Business Logic", () => {
+describe("Engine Handlers Business Logic", () => {
   const mockDb = {
     prepare: vi.fn().mockReturnThis(),
     bind: vi.fn().mockReturnThis(),

@@ -1,11 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { type CoreEnv, FactoryEngine } from "./factory/engine";
+import { type CoreEnv, handleUpdate } from "./factory/engine";
 import worker from "./index";
 
 vi.mock("./factory/engine", () => ({
-  FactoryEngine: {
-    handleUpdate: vi.fn(async () => new Response("OK")),
-  },
+  handleUpdate: vi.fn(async () => new Response("OK")),
 }));
 
 async function hashSecret(secret: string): Promise<string> {
@@ -69,7 +67,7 @@ describe("Worker Entry Point", () => {
 
     const response = await worker.fetch(request, mockEnv, mockCtx);
     expect(response.status).toBe(200);
-    expect(FactoryEngine.handleUpdate).toHaveBeenCalled();
+    expect(handleUpdate).toHaveBeenCalled();
   });
 
   it("should persist webhook_secret_hash during config update", async () => {
