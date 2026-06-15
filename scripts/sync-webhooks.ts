@@ -1,4 +1,4 @@
-import { FactoryBotConfig } from "../src/factory/engine";
+import { FactoryBotConfig } from "../src/factory/types";
 
 async function hashSecret(secret: string): Promise<string> {
   const encoder = new TextEncoder();

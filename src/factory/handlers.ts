@@ -41,27 +41,13 @@ export async function handleConfirmAndProcess(ctx: FactoryContext, msgId: number
 
   const ai = new GoogleGenAI({ apiKey: ctx.env.GEMINI_API_KEY });
 
-  const titaniumSystemPrompt = `
-${config.system_prompt}
-
-### REGLAS DE RESPUESTA TITANIUM (ESTRICTO)
-1. **Identidad:** Eres una autoridad en Automatización de Alto Rendimiento y Arquitectura Serverless.
-2. **Tono:** Profesional Agresivo. Directo, eficiente, sin rellenos.
-3. **Estructura de Pirámide Invertida:**
-   - **CONCLUSIÓN EJECUTIVA:** Responde directamente a lo solicitado en la primera línea.
-   - **PUNTOS DE APOYO:** Usa listas para desglosar la lógica técnica.
-   - **CALL TO ACTION (CTA):** Define el siguiente paso lógico.
-4. **Semántica:** Usa terminología avanzada (Escalabilidad, Inyección de Entidades, Latencia Cognitiva).
-5. **Formato:** Usa HTML. Usa negritas para jerarquía.
-    `.trim();
-
   try {
     const result = await ai.models.generateContent({
       model: ctx.env.AI_MODEL_NAME,
       contents: contents,
       config: {
         systemInstruction: {
-          parts: [{ text: titaniumSystemPrompt }],
+          parts: [{ text: config.system_prompt.trim() }],
         },
       },
     });
@@ -98,12 +84,11 @@ export async function handleAction(ctx: FactoryContext, action: string) {
 
   if (sequences.results && sequences.results.length > 0) {
     for (const step of sequences.results) {
-      const header = `<b>[ SECUENCIA: ${step.title.toUpperCase()} ]</b>\n\n`;
-      await ctx.reply(`${header}${step.description}`, {
+      await ctx.reply(step.description, {
         parse_mode: "HTML",
       });
     }
   } else {
-    await ctx.reply("<code>ESTADO: ACCIÓN NO DEFINIDA</code>");
+    await ctx.reply("<code>Acción no definida.</code>");
   }
 }

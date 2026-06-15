@@ -10,23 +10,6 @@ import {
 } from "./types";
 import { handleAction, handleConfirmAndProcess } from "./handlers";
 
-// --- TITANIUM LOGGING ---
-
-export class BorgLogger {
-  constructor(
-    private scope: string,
-    private traceId: string
-  ) {}
-
-  info(tag: string, message: string) {
-    console.log(`[${this.scope}][${this.traceId}][INFO][${tag}] ${message}`);
-  }
-
-  error(tag: string, message: string) {
-    console.error(`[${this.scope}][${this.traceId}][ERROR][${tag}] ${message}`);
-  }
-}
-
 // --- FACTORY ENGINE ---
 
 export class FactoryEngine {
@@ -48,7 +31,7 @@ export class FactoryEngine {
 
     const token = env.BOT_TOKENS[config.token_var_name];
     if (!token) {
-      return new Response(`Secret ${config.token_var_name} not found`, { status: 500 });
+      return new Response("Internal configuration error", { status: 500 });
     }
 
     const bot = new Bot<FactoryContext>(token);
@@ -89,10 +72,7 @@ export class FactoryEngine {
         console.error("Menu parsing error:", e);
       }
 
-      const header = `<b>[ TITANIUM CORE ACTIVATED ]</b>\n\n`;
-      const footer = `\n\n<i>Sistema operativo. Esperando parámetros.</i>`;
-
-      await ctx.reply(`${header}${config.welcome_message}${footer}`, {
+      await ctx.reply(config.welcome_message, {
         parse_mode: "HTML",
         reply_markup: keyboard,
       });
@@ -107,7 +87,7 @@ export class FactoryEngine {
       });
 
       if (replyKeyboard.keyboard.length > 0) {
-        await ctx.reply("<code>INTERFACE_MENU_MAP:</code>", {
+        await ctx.reply("Accediendo al menú...", {
           parse_mode: "HTML",
           reply_markup: replyKeyboard,
         });
@@ -166,12 +146,12 @@ export class FactoryEngine {
         .run();
 
       const keyboard = new InlineKeyboard().text(
-        "⚡ EJECUTAR ASIMILACIÓN",
+        "⚡ PROCESAR",
         `fact_exec:${msgId}`
       );
 
       await ctx.reply(
-        `<b>ANÁLISIS DE ENTRADA REQUERIDO</b>\n\n<code>BUFFER:</code> <i>"${text.substring(0, 100)}${text.length > 100 ? "..." : ""}"</i>\n\n¿Proceder con el procesamiento de alto rendimiento?`,
+        `<b>ENTRADA RECIBIDA</b>\n\n<code>CONTENIDO:</code> <i>"${text.substring(0, 100)}${text.length > 100 ? "..." : ""}"</i>\n\n¿Desea procesar este mensaje con IA?`,
         { parse_mode: "HTML", reply_markup: keyboard }
       );
     });
