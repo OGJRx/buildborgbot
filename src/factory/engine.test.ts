@@ -135,9 +135,9 @@ describe("Engine Handlers Business Logic", () => {
     });
 
     it("should handle missing message record", async () => {
-       // Mock resilience checks
-       mockDb.first.mockResolvedValueOnce({ request_count: 1 }); // RL
-       mockDb.first.mockResolvedValueOnce({ state: "CLOSED" }); // CB
+      // Mock resilience checks
+      mockDb.first.mockResolvedValueOnce({ request_count: 1 }); // RL
+      mockDb.first.mockResolvedValueOnce({ state: "CLOSED" }); // CB
 
       mockDb.first.mockResolvedValueOnce(null);
 
@@ -149,9 +149,9 @@ describe("Engine Handlers Business Logic", () => {
     });
 
     it("should not call AI if budget is exceeded", async () => {
-        // Mock resilience checks
-        mockDb.first.mockResolvedValueOnce({ request_count: 1 }); // RL
-        mockDb.first.mockResolvedValueOnce({ state: "CLOSED" }); // CB
+      // Mock resilience checks
+      mockDb.first.mockResolvedValueOnce({ request_count: 1 }); // RL
+      mockDb.first.mockResolvedValueOnce({ state: "CLOSED" }); // CB
 
       mockDb.first.mockResolvedValueOnce({ content: "User Input" });
       mockDb.first.mockResolvedValueOnce({ system_prompt: "Be helpful" });

@@ -22,7 +22,7 @@ import {
 } from "./handlers";
 import { markUpdateProcessed } from "./platform";
 import { MenuSchema } from "./schemas";
-import type { CoreEnv, FactoryBotConfig, FactoryContext, Menu } from "./types";
+import type { CoreEnv, FactoryContext, Menu } from "./types";
 
 // --- FACTORY ENGINE ---
 
@@ -204,8 +204,8 @@ function setupBot(
     if (action === "feedback" || action.startsWith("sequence_")) {
       await handleAction(ctx, action);
     } else if (action === "fact_exec") {
-      const msgId = parseInt(payload, 10);
-      if (!isNaN(msgId)) {
+      const msgId = Number.parseInt(payload, 10);
+      if (!Number.isNaN(msgId)) {
         await handleConfirmAndProcess(ctx, msgId);
       }
     } else if (action === "fact_summarize") {
