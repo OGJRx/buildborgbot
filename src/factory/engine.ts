@@ -13,6 +13,7 @@ import {
   session,
 } from "grammy";
 import type { Update } from "grammy/types";
+import { setupBotFather } from "./botfather";
 import { buildCallback, parseCallback } from "./callback";
 import { feedbackConversation } from "./conversations";
 import {
@@ -32,6 +33,7 @@ export async function handleUpdate(
   update: Update,
   env: CoreEnv,
   waitUntil: (promise: Promise<unknown>) => void,
+  host = "unknown",
 ): Promise<Response> {
   const db = env.DB;
   const bot = new Bot<FactoryContext>(token);
@@ -39,6 +41,7 @@ export async function handleUpdate(
   bot.use(async (ctx, next) => {
     ctx.env = env;
     ctx.botId = botId;
+    ctx.host = host;
     await next();
   });
 
@@ -86,7 +89,11 @@ export async function handleUpdate(
     }),
   );
 
-  setupBot(bot, waitUntil);
+  if (botId === "botfather") {
+    setupBotFather(bot);
+  } else {
+    setupBot(bot, waitUntil);
+  }
 
   // Mark processed and run update in parallel
   const runUpdate = async () => {

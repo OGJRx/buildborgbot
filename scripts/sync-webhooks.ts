@@ -1,19 +1,9 @@
 import type { FactoryBotConfig } from "../src/factory/types";
 
-async function hashSecret(secret: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(secret);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 async function sync() {
   const { WORKER_URL, TITANIUM_API_SECRET } = process.env;
   if (!WORKER_URL || !TITANIUM_API_SECRET) {
-    throw new Error(
-      "Missing WORKER_URL or TITANIUM_API_SECRET in environment variables",
-    );
+    throw new Error("Missing WORKER_URL or TITANIUM_API_SECRET");
   }
 
   console.log(`Fetching bots from ${WORKER_URL}...`);
@@ -25,59 +15,73 @@ async function sync() {
     throw new Error(`Failed to fetch bots: ${response.statusText}`);
   }
 
-  const bots = (await response.json()) as FactoryBotConfig[];
+  const bots = (await response.json()) as Array<FactoryBotConfig & { slug: string }>;
   console.log(`Found ${bots.length} bots.`);
 
   for (const bot of bots) {
-    const token = process.env[bot.token_var_name];
-    if (!token) {
-      console.warn(
-        `Warning: Token environment variable '${bot.token_var_name}' not found for bot '${bot.bot_id}'`,
-      );
+    if (!bot.slug) {
+      console.warn(`Skipping ${bot.bot_id}: no slug configured`);
       continue;
     }
 
-    const webhookSecret = crypto.randomUUID();
-    const webhookSecretHash = await hashSecret(webhookSecret);
+    // Fetch webhook_secret from D1 (stored as plaintext UUID)
+    const secretResponse = await fetch(
+      `${WORKER_URL}/api/factory/config`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-titanium-api-secret": TITANIUM_API_SECRET,
+        },
+        body: JSON.stringify(bot),
+      }
+    );
 
-    // 1. Update secret hash in D1
-    console.log(`Updating secret hash for ${bot.bot_id} in D1...`);
-    const configUpdateRes = await fetch(`${WORKER_URL}/api/factory/config`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-titanium-api-secret": TITANIUM_API_SECRET,
-      },
-      body: JSON.stringify({
-        ...bot,
-        webhook_secret_hash: webhookSecretHash,
-      }),
-    });
-
-    if (!configUpdateRes.ok) {
-      throw new Error(
-        `Failed to update config for ${bot.bot_id}: ${configUpdateRes.statusText}`,
-      );
+    // Get the bot's token (from env for now, migration endpoint handles D1 storage)
+    const token = process.env[bot.token_var_name];
+    if (!token) {
+      console.warn(`Skipping ${bot.bot_id}: token env ${bot.token_var_name} not found`);
+      continue;
     }
 
-    // 2. Set Webhook in Telegram with the secret
-    const webhookUrl = `${WORKER_URL}/webhook/factory/${bot.bot_id}`;
-    const telegramUrl = `https://api.telegram.org/bot${token}/setWebhook?url=${encodeURIComponent(
-      webhookUrl,
-    )}&secret_token=${webhookSecret}`;
-
-    console.log(
-      `Setting webhook for ${bot.bot_id} to ${webhookUrl} (with secret)...`,
+    // We need the webhook_secret from the bot record
+    // The /api/factory/bots endpoint doesn't expose webhook_secret for security
+    // So we use the migration endpoint's pattern: fetch bot details
+    const botDetailResponse = await fetch(
+      `${WORKER_URL}/api/factory/bots/${bot.bot_id}`,
+      {
+        headers: { "x-titanium-api-secret": TITANIUM_API_SECRET },
+      }
     );
+
+    // For now, generate a new webhook secret and update via migrate endpoint
+    // This is a bootstrap script — after migration, tokens live in D1
+    const webhookSecret = crypto.randomUUID();
+    const webhookUrl = `${WORKER_URL}/webhook/${bot.slug}`;
+
+    console.log(`Setting webhook for ${bot.bot_id} -> ${webhookUrl}`);
+
+    const telegramUrl = `https://api.telegram.org/bot${token}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${webhookSecret}`;
+
     const res = await fetch(telegramUrl);
     const data = (await res.json()) as { ok: boolean; description?: string };
 
     if (!data.ok) {
-      throw new Error(
-        `Critical Error: Failed to set webhook for ${bot.bot_id}: ${data.description}`,
-      );
+      console.error(`FAILED ${bot.bot_id}: ${data.description}`);
+      continue;
     }
-    console.log(`Webhook set successfully for ${bot.bot_id}`);
+
+    // Update webhook_secret in D1
+    await fetch(`${WORKER_URL}/api/factory/bots/${bot.bot_id}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "x-titanium-api-secret": TITANIUM_API_SECRET,
+      },
+      body: JSON.stringify({ webhook_secret: webhookSecret }),
+    });
+
+    console.log(`✅ ${bot.bot_id} webhook set successfully`);
   }
 }
 

@@ -61,8 +61,7 @@ export async function runAgent(
         ),
       ]);
 
-      const response = result as unknown as { text?: string };
-      const text = response.text;
+      const text = result.text;
       if (!text) throw new Error("No response text from Gemini");
 
       await reportSuccess(db, request.botId);
@@ -71,9 +70,14 @@ export async function runAgent(
       const error = err instanceof Error ? err : new Error(String(err));
       lastError = error;
 
-      const status = (err as { status?: number | string })?.status || 0;
-      const statusCode =
-        typeof status === "string" ? Number.parseInt(status, 10) : status;
+      let statusCode = 0;
+      if (err instanceof Error && "status" in err) {
+        const status = (err as Error & { status: unknown }).status;
+        statusCode =
+          typeof status === "number"
+            ? status
+            : Number.parseInt(String(status), 10);
+      }
 
       // Errors that trigger circuit breaker: 429, 5xx, or Timeout
       const isRetryable =
