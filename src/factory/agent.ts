@@ -40,7 +40,7 @@ export async function runAgent(
       }
 
       const ai = new GoogleGenAI({ apiKey: request.apiKey });
-      const model = ai.models.generateContent({
+      const modelPromise = ai.models.generateContent({
         model: request.modelName,
         contents: request.contents,
         config: {
@@ -51,8 +51,8 @@ export async function runAgent(
       });
 
       // Implement timeout using Promise.race
-      const response = await Promise.race([
-        model,
+      const result = await Promise.race([
+        modelPromise,
         new Promise<never>((_, reject) =>
           setTimeout(
             () => reject(new Error("Network timeout")),
@@ -61,7 +61,8 @@ export async function runAgent(
         ),
       ]);
 
-      const text = response.response.text();
+      const response = result as unknown as { text?: string };
+      const text = response.text;
       if (!text) throw new Error("No response text from Gemini");
 
       await reportSuccess(db, request.botId);
@@ -70,12 +71,14 @@ export async function runAgent(
       const error = err instanceof Error ? err : new Error(String(err));
       lastError = error;
 
-      const status = (err as { status?: number })?.status || 0;
+      const status = (err as { status?: number | string })?.status || 0;
+      const statusCode =
+        typeof status === "string" ? Number.parseInt(status, 10) : status;
 
       // Errors that trigger circuit breaker: 429, 5xx, or Timeout
       const isRetryable =
-        status === 429 ||
-        (status >= 500 && status <= 599) ||
+        statusCode === 429 ||
+        (statusCode >= 500 && statusCode <= 599) ||
         error.message === "Network timeout";
 
       if (!isRetryable) {

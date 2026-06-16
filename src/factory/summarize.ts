@@ -26,7 +26,7 @@ export async function summarizeConversation(
       .join("\n\n");
 
     const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
-    const result = await ai.models.generateContent({
+    const resultPromise = ai.models.generateContent({
       model: env.AI_MODEL_NAME,
       contents: [
         {
@@ -39,7 +39,8 @@ export async function summarizeConversation(
         },
       ],
     });
-    summary = result.response.text();
+    const result = (await resultPromise) as unknown as { text?: string };
+    summary = result.text || "";
   }
 
   if (!summary) throw new Error("Failed to generate summary");
