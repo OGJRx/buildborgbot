@@ -40,7 +40,7 @@ export function smartSplitHtml(text: string, maxLength = 4000): string[] {
     let match = tagRegex.exec(block);
     while (match !== null) {
       const isClosing = !!match[1];
-      const tagName = match[2].toLowerCase();
+      const tagName = match[2]?.toLowerCase() || "";
       const attributes = match[3];
 
       if (tags.includes(tagName)) {
@@ -55,8 +55,11 @@ export function smartSplitHtml(text: string, maxLength = 4000): string[] {
 
     // Close open tags at the end of block
     for (let i = openTags.length - 1; i >= 0; i--) {
-      const tagNameOnly = openTags[i].split(" ")[0];
-      block += `</${tagNameOnly}>`;
+      const tagInfo = openTags[i];
+      if (tagInfo) {
+        const tagNameOnly = tagInfo.split(" ")[0] || "";
+        block += `</${tagNameOnly}>`;
+      }
     }
 
     blocks.push(block);

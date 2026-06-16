@@ -130,7 +130,9 @@ function setupBot(
         keyboard.text(btn.label, cb);
       }
       // Chunking keyboard
-      keyboard.toRow(2);
+      if (keyboard.inline_keyboard.length > 0) {
+        keyboard.row();
+      }
     } catch (e) {
       console.error("Menu parsing error:", e);
     }
