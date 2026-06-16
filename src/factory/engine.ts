@@ -121,17 +121,16 @@ function setupBot(
     try {
       const parsed = JSON.parse(config.menu_json);
       menu = MenuSchema.parse(parsed);
-      for (const btn of menu) {
+      for (let i = 0; i < menu.length; i++) {
+        const btn = menu[i];
+        if (!btn) continue;
         const cb = await buildCallback(db, ctx.env.TITANIUM_API_SECRET, {
           bot_id: ctx.botId,
           action: btn.action,
           payload: "",
         });
         keyboard.text(btn.label, cb);
-      }
-      // Chunking keyboard
-      if (keyboard.inline_keyboard.length > 0) {
-        keyboard.row();
+        if (i % 2 === 1) keyboard.row();
       }
     } catch (e) {
       console.error("Menu parsing error:", e);
