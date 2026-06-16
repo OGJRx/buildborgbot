@@ -35,6 +35,7 @@ describe("Engine Handlers Business Logic", () => {
     DB: mockDb as unknown as D1Database,
     GEMINI_API_KEY: "test-ai-key",
     AI_MODEL_NAME: "test-model",
+    TITANIUM_API_SECRET: "test-api-secret",
     BOT_TOKENS: {},
   } as unknown as CoreEnv;
 
@@ -50,6 +51,7 @@ describe("Engine Handlers Business Logic", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDb.run.mockResolvedValue({ success: true, meta: { last_row_id: 1 } });
   });
 
   describe("handleAction", () => {
@@ -105,6 +107,11 @@ describe("Engine Handlers Business Logic", () => {
 
   describe("handleConfirmAndProcess", () => {
     it("should process user message and reply with AI response", async () => {
+      // 1. Rate Limit Check
+      mockDb.first.mockResolvedValueOnce({ request_count: 1 });
+      // 2. Circuit Breaker Check
+      mockDb.first.mockResolvedValueOnce({ state: "CLOSED" });
+
       // Mock message record retrieval
       mockDb.first.mockResolvedValueOnce({ content: "User Input" });
       // Mock system prompt retrieval
@@ -128,6 +135,10 @@ describe("Engine Handlers Business Logic", () => {
     });
 
     it("should handle missing message record", async () => {
+       // Mock resilience checks
+       mockDb.first.mockResolvedValueOnce({ request_count: 1 }); // RL
+       mockDb.first.mockResolvedValueOnce({ state: "CLOSED" }); // CB
+
       mockDb.first.mockResolvedValueOnce(null);
 
       await handleConfirmAndProcess(mockCtx, 999);
@@ -138,6 +149,10 @@ describe("Engine Handlers Business Logic", () => {
     });
 
     it("should not call AI if budget is exceeded", async () => {
+        // Mock resilience checks
+        mockDb.first.mockResolvedValueOnce({ request_count: 1 }); // RL
+        mockDb.first.mockResolvedValueOnce({ state: "CLOSED" }); // CB
+
       mockDb.first.mockResolvedValueOnce({ content: "User Input" });
       mockDb.first.mockResolvedValueOnce({ system_prompt: "Be helpful" });
 

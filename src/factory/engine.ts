@@ -13,12 +13,14 @@ import {
   session,
 } from "grammy";
 import type { Update } from "grammy/types";
+import { buildCallback, parseCallback } from "./callback";
 import { feedbackConversation } from "./conversations";
 import {
   handleAction,
   handleConfirmAndProcess,
   handleSummarize,
 } from "./handlers";
+import { markUpdateProcessed } from "./platform";
 import { MenuSchema } from "./schemas";
 import type { CoreEnv, FactoryBotConfig, FactoryContext, Menu } from "./types";
 
@@ -26,25 +28,12 @@ import type { CoreEnv, FactoryBotConfig, FactoryContext, Menu } from "./types";
 
 export async function handleUpdate(
   botId: string,
+  token: string,
   update: Update,
   env: CoreEnv,
   waitUntil: (promise: Promise<unknown>) => void,
 ): Promise<Response> {
   const db = env.DB;
-  const config = await db
-    .prepare(
-      "SELECT bot_id, bot_name, token_var_name, system_prompt, welcome_message, menu_json, webhook_secret_hash FROM factory_bots WHERE bot_id = ?",
-    )
-    .bind(botId)
-    .first<FactoryBotConfig>();
-
-  if (!config) return new Response("Bot not found", { status: 404 });
-
-  const token = env.BOT_TOKENS[config.token_var_name];
-  if (!token) {
-    return new Response("Internal configuration error", { status: 500 });
-  }
-
   const bot = new Bot<FactoryContext>(token);
 
   bot.use(async (ctx, next) => {
@@ -99,7 +88,13 @@ export async function handleUpdate(
 
   setupBot(bot, waitUntil);
 
-  waitUntil(bot.handleUpdate(update));
+  // Mark processed and run update in parallel
+  const runUpdate = async () => {
+    await bot.handleUpdate(update);
+    await (await markUpdateProcessed(db, botId, update.update_id)).run();
+  };
+
+  waitUntil(runUpdate());
 
   return new Response("OK");
 }
@@ -126,10 +121,16 @@ function setupBot(
     try {
       const parsed = JSON.parse(config.menu_json);
       menu = MenuSchema.parse(parsed);
-      menu.forEach((btn, i) => {
-        keyboard.text(btn.label, `fact_act:${btn.action}`);
-        if (i % 2 === 1) keyboard.row();
-      });
+      for (const btn of menu) {
+        const cb = await buildCallback(db, ctx.env.TITANIUM_API_SECRET, {
+          bot_id: ctx.botId,
+          action: btn.action,
+          payload: "",
+        });
+        keyboard.text(btn.label, cb);
+      }
+      // Chunking keyboard
+      keyboard.toRow(2);
     } catch (e) {
       console.error("Menu parsing error:", e);
     }
@@ -185,18 +186,35 @@ function setupBot(
 
   bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
-    if (data.startsWith("fact_act:")) {
-      const action = data.split(":")[1];
-      if (action) await handleAction(ctx, action);
-    } else if (data.startsWith("fact_exec:")) {
-      const msgIdStr = data.split(":")[1];
-      if (msgIdStr) {
-        const msgId = parseInt(msgIdStr, 10);
+    const db = ctx.env.DB;
+    const apiSecret = ctx.env.TITANIUM_API_SECRET;
+
+    // Pointer Pattern parsing
+    const parsed = await parseCallback(db, apiSecret, ctx.botId, data);
+    if (!parsed) {
+      // Legacy support or fallback
+      if (data === "fact_summarize") {
+        await handleSummarize(ctx);
+      }
+      return await ctx.answerCallbackQuery("⚠️ Sesión expirada o inválida.");
+    }
+
+    const { action, payload } = parsed;
+
+    if (action === "feedback" || action.startsWith("sequence_")) {
+      await handleAction(ctx, action);
+    } else if (action === "fact_exec") {
+      const msgId = parseInt(payload, 10);
+      if (!isNaN(msgId)) {
         await handleConfirmAndProcess(ctx, msgId);
       }
-    } else if (data === "fact_summarize") {
+    } else if (action === "fact_summarize") {
       await handleSummarize(ctx);
+    } else {
+      // Direct action from menu
+      await handleAction(ctx, action);
     }
+
     await ctx.answerCallbackQuery().catch((err: unknown) => {
       console.error(
         `[CALLBACK_QUERY_ERROR] bot=${ctx.botId} chat=${ctx.chat?.id} err=${String(err)}`,
@@ -216,10 +234,13 @@ function setupBot(
       .bind(ctx.botId, String(ctx.chat.id), msgId, "user", text)
       .run();
 
-    const keyboard = new InlineKeyboard().text(
-      "⚡ PROCESAR",
-      `fact_exec:${msgId}`,
-    );
+    const cb = await buildCallback(ctx.env.DB, ctx.env.TITANIUM_API_SECRET, {
+      bot_id: ctx.botId,
+      action: "fact_exec",
+      payload: String(msgId),
+    });
+
+    const keyboard = new InlineKeyboard().text("⚡ PROCESAR", cb);
 
     await ctx.reply(
       `<b>ENTRADA RECIBIDA</b>\n\n<code>CONTENIDO:</code> <i>"${text.substring(0, 100)}${text.length > 100 ? "..." : ""}"</i>\n\n¿Desea procesar este mensaje con IA?`,

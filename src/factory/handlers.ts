@@ -1,8 +1,79 @@
-import { GoogleGenAI } from "@google/genai";
 import { InlineKeyboard } from "grammy";
+import { runAgent } from "./agent";
+import { buildCallback } from "./callback";
+import { canProceed, checkRateLimit } from "./resilience";
 import { summarizeConversation } from "./summarize";
 import { buildBudgetedHistory, estimateTokens } from "./token-budget";
 import type { FactoryContext, FactorySequence } from "./types";
+
+/**
+ * Smart HTML Splitting (Titanium Standard)
+ */
+export function smartSplitHtml(text: string, maxLength = 4000): string[] {
+  if (text.length <= maxLength) return [text];
+
+  const blocks: string[] = [];
+  let currentPos = 0;
+
+  while (currentPos < text.length) {
+    let endPos = currentPos + maxLength;
+    if (endPos > text.length) endPos = text.length;
+
+    // Try to split by paragraph first
+    let splitPos = text.lastIndexOf("\n\n", endPos);
+    if (splitPos <= currentPos) {
+      splitPos = text.lastIndexOf("\n", endPos);
+    }
+    if (splitPos <= currentPos) {
+      splitPos = endPos;
+    }
+
+    let block = text.substring(currentPos, splitPos);
+
+    // Track open tags and close them
+    const tags = ["b", "i", "code", "pre", "em", "strong", "blockquote", "a"];
+    const openTags: string[] = [];
+    // Enhanced regex to capture full opening tag including attributes for <a>
+    const tagRegex = /<(\/)?([a-z1-6]+)([^>]*)>/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = tagRegex.exec(block)) !== null) {
+      const isClosing = !!match[1];
+      const tagName = match[2].toLowerCase();
+      const attributes = match[3];
+
+      if (tags.includes(tagName)) {
+        if (isClosing) {
+          openTags.pop();
+        } else {
+          openTags.push(tagName + (attributes || ""));
+        }
+      }
+    }
+
+    // Close open tags at the end of block
+    for (let i = openTags.length - 1; i >= 0; i--) {
+      const tagNameOnly = openTags[i].split(" ")[0];
+      block += `</${tagNameOnly}>`;
+    }
+
+    blocks.push(block);
+
+    // Reopen tags at the beginning of next block
+    let prefix = "";
+    for (const tagFull of openTags) {
+      prefix += `<${tagFull}>`;
+    }
+
+    currentPos = splitPos;
+    if (currentPos < text.length) {
+      text = text.substring(0, currentPos) + prefix + text.substring(currentPos);
+      currentPos += prefix.length;
+    }
+  }
+
+  return blocks;
+}
 
 export async function handleConfirmAndProcess(
   ctx: FactoryContext,
@@ -12,6 +83,24 @@ export async function handleConfirmAndProcess(
   const db = ctx.env.DB;
   const botId = ctx.botId;
   const chatId = String(ctx.chat.id);
+
+  // 1. Rate Limit Check
+  const rateLimit = await checkRateLimit(db, botId);
+  if (!rateLimit.allowed) {
+    return await ctx.reply(
+      `⏳ <b>Demasiadas solicitudes.</b>\n\nIntenta de nuevo en ${rateLimit.remainingSeconds}s.`,
+      { parse_mode: "HTML" },
+    );
+  }
+
+  // 2. Circuit Breaker Check
+  const allowed = await canProceed(db, botId);
+  if (!allowed) {
+    return await ctx.reply(
+      "🔧 <b>El bot está en mantenimiento.</b>\n\nIntenta de nuevo más tarde.",
+      { parse_mode: "HTML" },
+    );
+  }
 
   const msgRecord = await db
     .prepare(
@@ -46,10 +135,12 @@ export async function handleConfirmAndProcess(
   );
 
   if (budget.requiresSummarization) {
-    const keyboard = new InlineKeyboard().text(
-      "⚡ Resumir memoria",
-      "fact_summarize",
-    );
+    const cb = await buildCallback(db, ctx.env.TITANIUM_API_SECRET, {
+      bot_id: botId,
+      action: "fact_summarize",
+      payload: "",
+    });
+    const keyboard = new InlineKeyboard().text("⚡ Resumir memoria", cb);
     return await ctx.reply(
       "⚠️ <b>ALERTA DE CAPACIDAD</b>\n\nEl historial de esta conversación excede el presupuesto de memoria permitido. Para mantener la coherencia y el control de costos, es necesario comprimir el contexto antes de continuar.",
       { parse_mode: "HTML", reply_markup: keyboard },
@@ -68,32 +159,29 @@ export async function handleConfirmAndProcess(
     systemInstruction += `\n\n[CONTEXTO PREVIO]:\n${budget.summaryContext}`;
   }
 
-  const ai = new GoogleGenAI({ apiKey: ctx.env.GEMINI_API_KEY });
-
   try {
-    const result = await ai.models.generateContent({
-      model: ctx.env.AI_MODEL_NAME,
+    const result = await runAgent(db, {
+      botId: botId,
+      systemInstruction: systemInstruction,
       contents: contents,
-      config: {
-        systemInstruction: {
-          parts: [{ text: systemInstruction }],
-        },
-      },
+      apiKey: ctx.env.GEMINI_API_KEY,
+      modelName: ctx.env.AI_MODEL_NAME,
     });
 
-    const responseText = result.text;
-    if (!responseText) throw new Error("No response text from Gemini");
+    const responseBlocks = smartSplitHtml(result.text);
 
-    const sentMsg = await ctx.reply(responseText, { parse_mode: "HTML" });
-    await db
-      .prepare(
-        "INSERT INTO factory_messages (bot_id, chat_id, message_id, role, content) VALUES (?, ?, ?, ?, ?)",
-      )
-      .bind(botId, chatId, sentMsg.message_id, "model", responseText)
-      .run();
+    for (const block of responseBlocks) {
+      const sentMsg = await ctx.reply(block, { parse_mode: "HTML" });
+      await db
+        .prepare(
+          "INSERT INTO factory_messages (bot_id, chat_id, message_id, role, content) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(botId, chatId, sentMsg.message_id, "model", block)
+        .run();
+    }
   } catch (err) {
-    console.error("GenAI Error:", err);
-    await ctx.reply("⚠️ ERROR TÉCNICO: Interrupción en el flujo de IA.");
+    console.error("Agent Error:", err);
+    await ctx.reply("❌ Error de procesamiento. Intenta de nuevo.");
   }
 }
 
