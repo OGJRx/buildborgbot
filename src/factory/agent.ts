@@ -1,0 +1,89 @@
+import { GoogleGenAI } from "@google/genai";
+import { reportFailure, reportSuccess } from "./resilience";
+
+/**
+ * AI Agent Factory (Titanium Standard)
+ */
+
+export interface AgentRequest {
+  botId: string;
+  systemInstruction: string;
+  contents: { role: string; parts: { text: string }[] }[];
+  apiKey: string;
+  modelName: string;
+}
+
+export interface AgentResponse {
+  text: string;
+}
+
+/**
+ * Runs the AI agent with 2 retries and exponential backoff.
+ * Total wall time budget is respected.
+ */
+export async function runAgent(
+  db: D1Database,
+  request: AgentRequest,
+): Promise<AgentResponse> {
+  const maxRetries = 2;
+  const initialDelay = 500;
+  const factor = 2;
+  const networkTimeout = 6000;
+
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        const delay = initialDelay * Math.pow(factor, attempt - 1);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+
+      const ai = new GoogleGenAI({ apiKey: request.apiKey });
+      const model = ai.models.generateContent({
+        model: request.modelName,
+        contents: request.contents,
+        config: {
+          systemInstruction: {
+            parts: [{ text: request.systemInstruction }],
+          },
+        },
+      });
+
+      // Implement timeout using Promise.race
+      const response = (await Promise.race([
+        model,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Network timeout")), networkTimeout),
+        ),
+      ])) as any;
+
+      const text = response.text;
+      if (!text) throw new Error("No response text from Gemini");
+
+      await reportSuccess(db, request.botId);
+      return { text };
+    } catch (err: any) {
+      lastError = err;
+      const status = err?.status || 0;
+
+      // Errors that trigger circuit breaker: 429, 5xx, or Timeout
+      const isRetryable =
+        status === 429 ||
+        (status >= 500 && status <= 599) ||
+        err.message === "Network timeout";
+
+      if (!isRetryable) {
+        // Permanent error, don't retry
+        throw err;
+      }
+
+      if (attempt === maxRetries) {
+        // Last attempt failed, report to circuit breaker
+        await reportFailure(db, request.botId);
+      }
+    }
+  }
+
+  throw lastError;
+}

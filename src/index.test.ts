@@ -1,17 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
-import { type CoreEnv, handleUpdate } from "./factory/engine";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { handleUpdate } from "./factory/engine";
 import worker from "./index";
+import { encrypt, deriveKey } from "./factory/security";
 
 vi.mock("./factory/engine", () => ({
   handleUpdate: vi.fn(async () => new Response("OK")),
 }));
-
-async function hashSecret(secret: string): Promise<string> {
-  const msgUint8 = new TextEncoder().encode(secret);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", msgUint8);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 describe("Worker Entry Point", () => {
   const mockDb = {
@@ -20,6 +14,7 @@ describe("Worker Entry Point", () => {
     first: vi.fn(),
     all: vi.fn(),
     run: vi.fn(),
+    batch: vi.fn(),
   };
 
   const mockEnv = {
@@ -30,11 +25,15 @@ describe("Worker Entry Point", () => {
     BOT_TOKENS: {
       BOT1_TOKEN: "token123",
     },
-  } as unknown as CoreEnv;
+  } as any;
 
   const mockCtx = {
     waitUntil: vi.fn(),
   } as unknown as ExecutionContext;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   it("should return 404 for unknown routes", async () => {
     const request = new Request("http://localhost/unknown");
@@ -43,7 +42,7 @@ describe("Worker Entry Point", () => {
   });
 
   it("should return 403 if secret header is missing in webhook", async () => {
-    const request = new Request("http://localhost/webhook/factory/bot1", {
+    const request = new Request("http://localhost/webhook/bot-slug", {
       method: "POST",
       body: JSON.stringify({ update_id: 1 }),
     });
@@ -53,11 +52,20 @@ describe("Worker Entry Point", () => {
 
   it("should route webhooks to FactoryEngine if secret matches", async () => {
     const secret = "tg-secret";
-    const secretHash = await hashSecret(secret);
+    const key = await deriveKey(mockEnv.TITANIUM_API_SECRET);
+    const { ciphertext, iv } = await encrypt("token123", key);
 
-    mockDb.first.mockResolvedValueOnce({ webhook_secret_hash: secretHash });
+    mockDb.first.mockResolvedValueOnce({
+        bot_id: "bot1",
+        token: ciphertext,
+        token_iv: iv,
+        webhook_secret: secret
+    });
 
-    const request = new Request("http://localhost/webhook/factory/bot1", {
+    // Mock idempotency check
+    mockDb.first.mockResolvedValueOnce(null);
+
+    const request = new Request("http://localhost/webhook/bot-slug", {
       method: "POST",
       headers: {
         "X-Telegram-Bot-Api-Secret-Token": secret,
@@ -70,7 +78,7 @@ describe("Worker Entry Point", () => {
     expect(handleUpdate).toHaveBeenCalled();
   });
 
-  it("should persist webhook_secret_hash during config update", async () => {
+  it("should handle config update and include slug and webhook_secret", async () => {
     const config = {
       bot_id: "bot1",
       bot_name: "Bot One",
@@ -78,7 +86,6 @@ describe("Worker Entry Point", () => {
       system_prompt: "Be a bot",
       welcome_message: "Hi",
       menu_json: "[]",
-      webhook_secret_hash: "new-hash",
     };
 
     const request = new Request("http://localhost/api/factory/config", {
@@ -90,12 +97,13 @@ describe("Worker Entry Point", () => {
       body: JSON.stringify(config),
     });
 
+    mockDb.first.mockResolvedValueOnce({ slug: "bot1-slug", webhook_secret: "uuid-secret" });
     mockDb.run.mockResolvedValueOnce({ success: true });
 
     const response = await worker.fetch(request, mockEnv, mockCtx);
     expect(response.status).toBe(200);
     expect(mockDb.prepare).toHaveBeenCalledWith(
-      expect.stringContaining("webhook_secret_hash"),
+      expect.stringContaining("INSERT INTO factory_bots"),
     );
     expect(mockDb.bind).toHaveBeenCalledWith(
       config.bot_id,
@@ -104,7 +112,8 @@ describe("Worker Entry Point", () => {
       config.system_prompt,
       config.welcome_message,
       config.menu_json,
-      config.webhook_secret_hash,
+      "bot1-slug",
+      "uuid-secret"
     );
   });
 });
