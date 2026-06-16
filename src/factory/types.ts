@@ -35,6 +35,7 @@ export type FactoryContext = Context &
     conversation: ConversationFlavor<Context>["conversation"];
     env: CoreEnv;
     botId: string;
+    host: string;
   };
 
 export type Menu = z.infer<typeof MenuSchema>;

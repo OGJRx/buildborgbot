@@ -9,7 +9,12 @@ import {
   SummarizeSchema,
   TelegramUpdateSchema,
 } from "./factory/schemas";
-import { decrypt, deriveKey, timingSafeEqual } from "./factory/security";
+import {
+  decrypt,
+  deriveKey,
+  encrypt,
+  timingSafeEqual,
+} from "./factory/security";
 import { summarizeConversation } from "./factory/summarize";
 import type { CoreEnv } from "./factory/types";
 
@@ -90,6 +95,7 @@ export default {
         update,
         env,
         ctx.waitUntil.bind(ctx),
+        request.headers.get("host") || "unknown",
       );
     }
 
@@ -190,6 +196,36 @@ export default {
           webhookSecret,
         )
         .run();
+
+      // Auto-setWebhook para bots nuevos (cuando no tiene token en D1 aún)
+      const isNewBot = !existing;
+      if (isNewBot && validated.token_var_name) {
+        const plainToken = env.BOT_TOKENS[validated.token_var_name];
+        if (plainToken && webhookSecret) {
+          const workerUrl = `https://${request.headers.get("host") || "unknown"}`;
+          const webhookUrl = `${workerUrl}/webhook/${slug}`;
+          const telegramApiUrl = `https://api.telegram.org/bot${plainToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${webhookSecret}`;
+
+          try {
+            const tgRes = await fetch(telegramApiUrl);
+            const tgData = (await tgRes.json()) as {
+              ok: boolean;
+              description?: string;
+            };
+            if (!tgData.ok) {
+              console.error(
+                `Webhook setup failed for ${validated.bot_id}: ${tgData.description}`,
+              );
+            }
+          } catch (webhookErr) {
+            console.error(
+              `Webhook setup error for ${validated.bot_id}:`,
+              webhookErr,
+            );
+          }
+        }
+      }
+
       return Response.json({ success: true });
     }
 
@@ -400,21 +436,3 @@ export default {
     return new Response("Not Found", { status: 404 });
   },
 };
-
-// Helper for encryption in migration
-async function encrypt(
-  plaintext: string,
-  key: CryptoKey,
-): Promise<{ ciphertext: string; iv: string }> {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encoder = new TextEncoder();
-  const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    key,
-    encoder.encode(plaintext),
-  );
-  return {
-    ciphertext: btoa(String.fromCharCode(...new Uint8Array(encrypted))),
-    iv: btoa(String.fromCharCode(...iv)),
-  };
-}

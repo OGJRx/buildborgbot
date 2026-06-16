@@ -39,8 +39,8 @@ export async function summarizeConversation(
         },
       ],
     });
-    const result = (await resultPromise) as unknown as { text?: string };
-    summary = result.text || "";
+    const result = await resultPromise;
+    summary = result.text ?? "";
   }
 
   if (!summary) throw new Error("Failed to generate summary");

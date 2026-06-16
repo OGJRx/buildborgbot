@@ -3,6 +3,76 @@ import type { FactoryContext } from "./types";
 
 type Convo = Conversation<FactoryContext, FactoryContext>;
 
+export async function newBotConversation(
+  conversation: Convo,
+  ctx: FactoryContext,
+): Promise<void> {
+  await ctx.reply(
+    "🆕 <b>NUEVO BOT BORG</b>\n\nIngresa el ID único del bot (slug):",
+    {
+      parse_mode: "HTML",
+    },
+  );
+  const botIdMsg = await conversation.waitFor("message:text");
+  const botId = botIdMsg.message.text;
+
+  await ctx.reply("📛 Ingresa el nombre público del bot:", {
+    parse_mode: "HTML",
+  });
+  const botNameMsg = await conversation.waitFor("message:text");
+  const botName = botNameMsg.message.text;
+
+  await ctx.reply(
+    "🔑 Ingresa el nombre de la variable de entorno del token (ej: <code>MY_BOT_TOKEN</code>):",
+    {
+      parse_mode: "HTML",
+    },
+  );
+  const tokenVarMsg = await conversation.waitFor("message:text");
+  const tokenVarName = tokenVarMsg.message.text;
+
+  await ctx.reply("📜 Ingresa el System Prompt (instrucciones de IA):", {
+    parse_mode: "HTML",
+  });
+  const promptMsg = await conversation.waitFor("message:text");
+  const systemPrompt = promptMsg.message.text;
+
+  await ctx.reply("⏳ Procesando creación...");
+
+  try {
+    const response = await conversation.external(() =>
+      fetch(`https://${ctx.host}/api/factory/config`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-titanium-api-secret": ctx.env.TITANIUM_API_SECRET,
+        },
+        body: JSON.stringify({
+          bot_id: botId,
+          bot_name: botName,
+          token_var_name: tokenVarName,
+          system_prompt: systemPrompt,
+          welcome_message: `¡Hola! Soy ${botName}. ¿En qué puedo ayudarte?`,
+          menu_json: "[]",
+        }),
+      }),
+    );
+
+    if (response.ok) {
+      await ctx.reply(
+        `✅ <b>BOT CREADO</b>\n\nID: <code>${botId}</code>\nURL Webhook: <code>/webhook/${botId}</code>`,
+        {
+          parse_mode: "HTML",
+        },
+      );
+    } else {
+      await ctx.reply(`❌ Error al crear bot: ${response.statusText}`);
+    }
+  } catch (err) {
+    await ctx.reply(`❌ Error crítico: ${String(err)}`);
+  }
+}
+
 export async function feedbackConversation(
   conversation: Convo,
   ctx: FactoryContext,
