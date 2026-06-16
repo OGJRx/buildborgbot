@@ -1,7 +1,7 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handleUpdate } from "./factory/engine";
+import { deriveKey, encrypt } from "./factory/security";
 import worker from "./index";
-import { encrypt, deriveKey } from "./factory/security";
 
 vi.mock("./factory/engine", () => ({
   handleUpdate: vi.fn(async () => new Response("OK")),
@@ -56,10 +56,10 @@ describe("Worker Entry Point", () => {
     const { ciphertext, iv } = await encrypt("token123", key);
 
     mockDb.first.mockResolvedValueOnce({
-        bot_id: "bot1",
-        token: ciphertext,
-        token_iv: iv,
-        webhook_secret: secret
+      bot_id: "bot1",
+      token: ciphertext,
+      token_iv: iv,
+      webhook_secret: secret,
     });
 
     // Mock idempotency check
@@ -97,7 +97,10 @@ describe("Worker Entry Point", () => {
       body: JSON.stringify(config),
     });
 
-    mockDb.first.mockResolvedValueOnce({ slug: "bot1-slug", webhook_secret: "uuid-secret" });
+    mockDb.first.mockResolvedValueOnce({
+      slug: "bot1-slug",
+      webhook_secret: "uuid-secret",
+    });
     mockDb.run.mockResolvedValueOnce({ success: true });
 
     const response = await worker.fetch(request, mockEnv, mockCtx);
@@ -113,7 +116,7 @@ describe("Worker Entry Point", () => {
       config.welcome_message,
       config.menu_json,
       "bot1-slug",
-      "uuid-secret"
+      "uuid-secret",
     );
   });
 });

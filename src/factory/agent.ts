@@ -30,12 +30,12 @@ export async function runAgent(
   const factor = 2;
   const networkTimeout = 6000;
 
-  let lastError: unknown;
+  let lastError: Error | undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       if (attempt > 0) {
-        const delay = initialDelay * Math.pow(factor, attempt - 1);
+        const delay = initialDelay * factor ** (attempt - 1);
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
 
@@ -51,31 +51,36 @@ export async function runAgent(
       });
 
       // Implement timeout using Promise.race
-      const response = (await Promise.race([
+      const response = await Promise.race([
         model,
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Network timeout")), networkTimeout),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("Network timeout")),
+            networkTimeout,
+          ),
         ),
-      ])) as any;
+      ]);
 
       const text = response.text;
       if (!text) throw new Error("No response text from Gemini");
 
       await reportSuccess(db, request.botId);
       return { text };
-    } catch (err: any) {
-      lastError = err;
-      const status = err?.status || 0;
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      lastError = error;
+
+      const status = (err as { status?: number })?.status || 0;
 
       // Errors that trigger circuit breaker: 429, 5xx, or Timeout
       const isRetryable =
         status === 429 ||
         (status >= 500 && status <= 599) ||
-        err.message === "Network timeout";
+        error.message === "Network timeout";
 
       if (!isRetryable) {
         // Permanent error, don't retry
-        throw err;
+        throw error;
       }
 
       if (attempt === maxRetries) {
@@ -85,5 +90,5 @@ export async function runAgent(
     }
   }
 
-  throw lastError;
+  throw lastError || new Error("Unknown error in AgentFactory");
 }

@@ -35,9 +35,9 @@ export function smartSplitHtml(text: string, maxLength = 4000): string[] {
     const openTags: string[] = [];
     // Enhanced regex to capture full opening tag including attributes for <a>
     const tagRegex = /<(\/)?([a-z1-6]+)([^>]*)>/gi;
-    let match: RegExpExecArray | null;
 
-    while ((match = tagRegex.exec(block)) !== null) {
+    let match = tagRegex.exec(block);
+    while (match !== null) {
       const isClosing = !!match[1];
       const tagName = match[2].toLowerCase();
       const attributes = match[3];
@@ -49,6 +49,7 @@ export function smartSplitHtml(text: string, maxLength = 4000): string[] {
           openTags.push(tagName + (attributes || ""));
         }
       }
+      match = tagRegex.exec(block);
     }
 
     // Close open tags at the end of block

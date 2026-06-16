@@ -55,9 +55,10 @@ export async function parseCallback(
   const parts = callbackString.split(":");
   if (parts.length !== 3) return null;
 
-  const [, sig8, refStr] = parts;
-  const ref = parseInt(refStr || "", 10);
-  if (isNaN(ref)) return null;
+  const sig8 = parts[1];
+  const refStr = parts[2];
+  const ref = Number.parseInt(refStr || "", 10);
+  if (Number.isNaN(ref)) return null;
 
   // Fetch from D1
   const row = await db
