@@ -7,7 +7,9 @@ import {
 import type { CoreEnv, FactoryContext } from "./types";
 
 const mockGenerateContent = vi.fn().mockResolvedValue({
-  text: "MOCKED_AI_RESPONSE",
+  response: {
+    text: () => "MOCKED_AI_RESPONSE",
+  },
 });
 
 vi.mock("@google/genai", () => {
@@ -121,7 +123,7 @@ describe("Engine Handlers Business Logic", () => {
         results: [{ role: "user", content: "Prev msg" }],
       });
       // Mock D1 run for saving model response
-      mockDb.run.mockResolvedValueOnce({ success: true });
+      mockDb.run.mockResolvedValue({ success: true, meta: { last_row_id: 1 } });
 
       await handleConfirmAndProcess(mockCtx, 123);
 
@@ -164,6 +166,9 @@ describe("Engine Handlers Business Logic", () => {
       }));
       mockDb.all.mockResolvedValueOnce({ results: heavyHistory });
 
+      // Mock D1 run for buildCallback (fact_summarize)
+      mockDb.run.mockResolvedValue({ success: true, meta: { last_row_id: 1 } });
+
       await handleConfirmAndProcess(mockCtx, 123);
 
       expect(mockCtx.reply).toHaveBeenCalledWith(
@@ -182,7 +187,11 @@ describe("Engine Handlers Business Logic", () => {
           { role: "model", content: "Hi" },
         ],
       });
-      mockGenerateContent.mockResolvedValueOnce({ text: "SUMMARY_TEXT" });
+      mockGenerateContent.mockResolvedValueOnce({
+        response: {
+          text: () => "SUMMARY_TEXT",
+        },
+      });
       mockDb.batch.mockResolvedValueOnce([]);
 
       await handleSummarize(mockCtx);

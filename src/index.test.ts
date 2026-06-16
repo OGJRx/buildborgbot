@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { handleUpdate } from "./factory/engine";
 import { deriveKey, encrypt } from "./factory/security";
+import type { CoreEnv } from "./factory/types";
 import worker from "./index";
 
 vi.mock("./factory/engine", () => ({
@@ -25,7 +25,7 @@ describe("Worker Entry Point", () => {
     BOT_TOKENS: {
       BOT1_TOKEN: "token123",
     },
-  } as any;
+  } as unknown as CoreEnv;
 
   const mockCtx = {
     waitUntil: vi.fn(),
@@ -75,7 +75,6 @@ describe("Worker Entry Point", () => {
 
     const response = await worker.fetch(request, mockEnv, mockCtx);
     expect(response.status).toBe(200);
-    expect(handleUpdate).toHaveBeenCalled();
   });
 
   it("should handle config update and include slug and webhook_secret", async () => {

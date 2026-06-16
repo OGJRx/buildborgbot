@@ -14,21 +14,22 @@ export function smartSplitHtml(text: string, maxLength = 4000): string[] {
 
   const blocks: string[] = [];
   let currentPos = 0;
+  let textToSplit = text;
 
-  while (currentPos < text.length) {
+  while (currentPos < textToSplit.length) {
     let endPos = currentPos + maxLength;
-    if (endPos > text.length) endPos = text.length;
+    if (endPos > textToSplit.length) endPos = textToSplit.length;
 
     // Try to split by paragraph first
-    let splitPos = text.lastIndexOf("\n\n", endPos);
+    let splitPos = textToSplit.lastIndexOf("\n\n", endPos);
     if (splitPos <= currentPos) {
-      splitPos = text.lastIndexOf("\n", endPos);
+      splitPos = textToSplit.lastIndexOf("\n", endPos);
     }
     if (splitPos <= currentPos) {
       splitPos = endPos;
     }
 
-    let block = text.substring(currentPos, splitPos);
+    let block = textToSplit.substring(currentPos, splitPos);
 
     // Track open tags and close them
     const tags = ["b", "i", "code", "pre", "em", "strong", "blockquote", "a"];
@@ -67,8 +68,11 @@ export function smartSplitHtml(text: string, maxLength = 4000): string[] {
     }
 
     currentPos = splitPos;
-    if (currentPos < text.length) {
-      text = text.substring(0, currentPos) + prefix + text.substring(currentPos);
+    if (currentPos < textToSplit.length) {
+      textToSplit =
+        textToSplit.substring(0, currentPos) +
+        prefix +
+        textToSplit.substring(currentPos);
       currentPos += prefix.length;
     }
   }
