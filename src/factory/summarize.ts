@@ -39,7 +39,7 @@ export async function summarizeConversation(
         },
       ],
     });
-    summary = result.text || "";
+    summary = result.response.text();
   }
 
   if (!summary) throw new Error("Failed to generate summary");
