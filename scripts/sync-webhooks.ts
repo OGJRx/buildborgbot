@@ -15,7 +15,9 @@ async function sync() {
     throw new Error(`Failed to fetch bots: ${response.statusText}`);
   }
 
-  const bots = (await response.json()) as Array<FactoryBotConfig & { slug: string }>;
+  const bots = (await response.json()) as Array<
+    FactoryBotConfig & { slug: string }
+  >;
   console.log(`Found ${bots.length} bots.`);
 
   for (const bot of bots) {
@@ -25,33 +27,32 @@ async function sync() {
     }
 
     // Fetch webhook_secret from D1 (stored as plaintext UUID)
-    const secretResponse = await fetch(
-      `${WORKER_URL}/api/factory/config`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-titanium-api-secret": TITANIUM_API_SECRET,
-        },
-        body: JSON.stringify(bot),
-      }
-    );
+    const _secretResponse = await fetch(`${WORKER_URL}/api/factory/config`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-titanium-api-secret": TITANIUM_API_SECRET,
+      },
+      body: JSON.stringify(bot),
+    });
 
     // Get the bot's token (from env for now, migration endpoint handles D1 storage)
     const token = process.env[bot.token_var_name];
     if (!token) {
-      console.warn(`Skipping ${bot.bot_id}: token env ${bot.token_var_name} not found`);
+      console.warn(
+        `Skipping ${bot.bot_id}: token env ${bot.token_var_name} not found`,
+      );
       continue;
     }
 
     // We need the webhook_secret from the bot record
     // The /api/factory/bots endpoint doesn't expose webhook_secret for security
     // So we use the migration endpoint's pattern: fetch bot details
-    const botDetailResponse = await fetch(
+    const _botDetailResponse = await fetch(
       `${WORKER_URL}/api/factory/bots/${bot.bot_id}`,
       {
         headers: { "x-titanium-api-secret": TITANIUM_API_SECRET },
-      }
+      },
     );
 
     // For now, generate a new webhook secret and update via migrate endpoint
