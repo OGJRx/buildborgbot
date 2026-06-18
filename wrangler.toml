@@ -5,12 +5,12 @@ compatibility_date = "2026-06-14"
 preview_urls = false
 
 [vars]
-AI_MODEL_NAME = "gemini-2.5-flash"
+AI_MODEL_NAME = "gemini-3.5-flash"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "bot_factory_db"
-database_id = "707affde-e219-4b26-b5bd-d110c318364d"
+database_id = "61a5d89a-19d2-4851-9f5b-3f088b729d0c"
 
 [observability]
 enabled = true
