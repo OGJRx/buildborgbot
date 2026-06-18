@@ -68,7 +68,9 @@ export async function newBotConversation(
         },
       );
     } else {
-      await ctx.reply(`❌ Error al crear bot: ${result.error ?? "Unknown error"}`);
+      await ctx.reply(
+        `❌ Error al crear bot: ${result.error ?? "Unknown error"}`,
+      );
     }
   } catch (err) {
     await ctx.reply(`❌ Error crítico: ${String(err)}`);

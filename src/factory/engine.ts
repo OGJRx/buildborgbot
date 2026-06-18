@@ -38,7 +38,7 @@ export async function handleUpdate(
   const db = env.DB;
 
   // Validate token format (Titanium Guard)
-  if (!token || !token.includes(":") || token.length < 10) {
+  if (!token?.includes(":") || token.length < 10) {
     console.error(`[FATAL] Invalid token for bot ${botId}`);
     return new Response("Unauthorized: Invalid Token Format", { status: 401 });
   }
