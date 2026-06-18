@@ -1,5 +1,6 @@
 import { createConversation } from "@grammyjs/conversations";
 import { type Bot, InlineKeyboard } from "grammy";
+import { buildCallback, parseCallback } from "./callback";
 import { newBotConversation } from "./conversations";
 import type { FactoryContext } from "./types";
 
@@ -11,12 +12,31 @@ export function setupBotFather(bot: Bot<FactoryContext>) {
   bot.use(createConversation(newBotConversation));
 
   bot.command("start", async (ctx) => {
+    const db = ctx.env.DB;
+    const apiSecret = ctx.env.TITANIUM_API_SECRET;
+
+    const cbNew = await buildCallback(db, apiSecret, {
+      bot_id: "botfather",
+      action: "bf_newbot",
+      payload: "",
+    });
+    const cbBots = await buildCallback(db, apiSecret, {
+      bot_id: "botfather",
+      action: "bf_mybots",
+      payload: "",
+    });
+    const cbHelp = await buildCallback(db, apiSecret, {
+      bot_id: "botfather",
+      action: "bf_help",
+      payload: "",
+    });
+
     const keyboard = new InlineKeyboard()
-      .text("🆕 Crear Bot", "bf_newbot")
+      .text("🆕 Crear Bot", cbNew)
       .row()
-      .text("📋 Mis Bots", "bf_mybots")
+      .text("📋 Mis Bots", cbBots)
       .row()
-      .text("❓ Ayuda", "bf_help");
+      .text("❓ Ayuda", cbHelp);
 
     await ctx.reply(
       "🤖 <b>Bienvenido a BuildBorg Factory</b>\n\nSoy tu BotFather 2.0. Puedo crear y gestionar bots de IA personalizados para ti.\n\nUsa los botones del menú para comenzar.",
@@ -24,57 +44,27 @@ export function setupBotFather(bot: Bot<FactoryContext>) {
     );
   });
 
-  bot.callbackQuery("bf_help", async (ctx) => {
-    await ctx.reply(
-      "<b>Guía de Comandos</b>\n\n" +
-        "/start - Menú principal\n" +
-        "/newbot - Crear un nuevo bot\n" +
-        "/mybots - Listar tus bots\n" +
-        "/deletebot {slug} - Eliminar un bot",
-      { parse_mode: "HTML" },
-    );
-    await ctx.answerCallbackQuery();
-  });
-
   bot.command("newbot", async (ctx) => {
     await ctx.conversation.enter("newBotConversation");
   });
 
-  bot.callbackQuery("bf_newbot", async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.conversation.enter("newBotConversation");
-  });
-
   bot.command("mybots", async (ctx) => {
-    const env = ctx.env;
-    const response = await fetch(`https://${ctx.host}/api/factory/bots`, {
-      headers: { "x-titanium-api-secret": env.TITANIUM_API_SECRET },
-    });
+    const bots = await ctx.env.DB.prepare(
+      "SELECT bot_name, slug FROM factory_bots",
+    ).all<{ bot_name: string; slug: string }>();
 
-    if (!response.ok) {
-      return await ctx.reply("❌ Error al obtener la lista de bots.");
-    }
+    const results = bots.results || [];
 
-    const bots = (await response.json()) as {
-      bot_name: string;
-      slug: string;
-    }[];
-    if (bots.length === 0) {
+    if (results.length === 0) {
       return await ctx.reply("No tienes bots registrados.");
     }
 
     let list = "<b>Tus Bots:</b>\n\n";
-    for (const bot of bots) {
+    for (const bot of results) {
       list += `• ${bot.bot_name} (<code>${bot.slug}</code>)\n`;
     }
 
     await ctx.reply(list, { parse_mode: "HTML" });
-  });
-
-  bot.callbackQuery("bf_mybots", async (ctx) => {
-    // Trigger the command
-    await ctx.answerCallbackQuery();
-    return ctx.reply("Usa el comando /mybots para ver la lista.");
   });
 
   bot.command("deletebot", async (ctx) => {
@@ -83,21 +73,83 @@ export function setupBotFather(bot: Bot<FactoryContext>) {
       return await ctx.reply("Usa: /deletebot {slug}");
     }
 
-    const env = ctx.env;
-    const response = await fetch(
-      `https://${ctx.host}/api/factory/bots/${slug}`,
-      {
-        method: "DELETE",
-        headers: { "x-titanium-api-secret": env.TITANIUM_API_SECRET },
-      },
+    const db = ctx.env.DB;
+    const bot = await db
+      .prepare("SELECT bot_id FROM factory_bots WHERE slug = ?")
+      .bind(slug)
+      .first<{ bot_id: string }>();
+
+    if (!bot) {
+      return await ctx.reply("❌ Bot no encontrado.");
+    }
+
+    await db.batch([
+      db
+        .prepare("DELETE FROM factory_sessions WHERE key LIKE ?")
+        .bind(`${bot.bot_id}:%`),
+      db
+        .prepare("DELETE FROM factory_callback_tokens WHERE bot_id = ?")
+        .bind(bot.bot_id),
+      db
+        .prepare("DELETE FROM factory_processed_updates WHERE bot_id = ?")
+        .bind(bot.bot_id),
+      db
+        .prepare("DELETE FROM factory_circuit_breaker WHERE bot_id = ?")
+        .bind(bot.bot_id),
+      db.prepare("DELETE FROM factory_bots WHERE bot_id = ?").bind(bot.bot_id),
+    ]);
+
+    await ctx.reply(`✅ Bot <code>${slug}</code> eliminado con éxito.`, {
+      parse_mode: "HTML",
+    });
+  });
+
+  // Action dispatcher for BotFather signed callbacks
+  bot.on("callback_query:data", async (ctx, next) => {
+    const db = ctx.env.DB;
+    const apiSecret = ctx.env.TITANIUM_API_SECRET;
+    const parsed = await parseCallback(
+      db,
+      apiSecret,
+      "botfather",
+      ctx.callbackQuery.data,
     );
 
-    if (response.ok) {
-      await ctx.reply(`✅ Bot <code>${slug}</code> eliminado con éxito.`, {
-        parse_mode: "HTML",
-      });
+    if (!parsed) return await next();
+
+    const { action } = parsed;
+
+    if (action === "bf_newbot") {
+      await ctx.answerCallbackQuery();
+      await ctx.conversation.enter("newBotConversation");
+    } else if (action === "bf_mybots") {
+      await ctx.answerCallbackQuery();
+      // Re-trigger the logic of /mybots
+      const bots = await ctx.env.DB.prepare(
+        "SELECT bot_name, slug FROM factory_bots",
+      ).all<{ bot_name: string; slug: string }>();
+      const results = bots.results || [];
+      if (results.length === 0) {
+        await ctx.reply("No tienes bots registrados.");
+      } else {
+        let list = "<b>Tus Bots:</b>\n\n";
+        for (const bot of results) {
+          list += `• ${bot.bot_name} (<code>${bot.slug}</code>)\n`;
+        }
+        await ctx.reply(list, { parse_mode: "HTML" });
+      }
+    } else if (action === "bf_help") {
+      await ctx.answerCallbackQuery();
+      await ctx.reply(
+        "<b>Guía de Comandos</b>\n\n" +
+          "/start - Menú principal\n" +
+          "/newbot - Crear un nuevo bot\n" +
+          "/mybots - Listar tus bots\n" +
+          "/deletebot {slug} - Eliminar un bot",
+        { parse_mode: "HTML" },
+      );
     } else {
-      await ctx.reply("❌ Error al eliminar el bot.");
+      await next();
     }
   });
 }
