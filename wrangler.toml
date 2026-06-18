@@ -1,6 +1,6 @@
 name = "fabricaborgbots"
 main = "src/index.ts"
-compatibility_date = "2026-06-14"
+compatibility_date = "2026-06-18"
 
 preview_urls = false
 
