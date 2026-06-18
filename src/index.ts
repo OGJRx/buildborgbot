@@ -48,7 +48,32 @@ export default {
       if (!incomingSecret)
         return new Response("Forbidden: Secret missing", { status: 403 });
 
-      // Lookup bot by slug
+      // Special case: BotFather admin bot (not in factory_bots table)
+      if (slug === "botfather") {
+        if (!timingSafeEqual(incomingSecret, env.TITANIUM_API_SECRET)) {
+          return new Response("Forbidden: Invalid secret", { status: 403 });
+        }
+
+        const body = await request.json();
+        const update = TelegramUpdateSchema.parse(body) as Update;
+
+        if (await isUpdateProcessed(env.DB, "botfather", update.update_id)) {
+          return new Response("OK (already processed)");
+        }
+
+        ctx.waitUntil(cleanupProcessedUpdates(env.DB));
+
+        return await handleUpdate(
+          "botfather",
+          env.TELEGRAM_BOT_TOKEN,
+          update,
+          env,
+          ctx.waitUntil.bind(ctx),
+          request.headers.get("host") || "unknown",
+        );
+      }
+
+      // Regular user bot: lookup by slug in factory_bots
       const botConfig = await env.DB.prepare(
         "SELECT bot_id, token, token_iv, webhook_secret FROM factory_bots WHERE slug = ?",
       )
@@ -215,8 +240,20 @@ export default {
         .run();
 
       // Auto-setWebhook logic
-      const plainToken =
-        validated.token || env.BOT_TOKENS[validated.token_var_name];
+      const botRow = await env.DB.prepare(
+        "SELECT token, token_iv FROM factory_bots WHERE bot_id = ?",
+      )
+        .bind(validated.bot_id)
+        .first<{ token: string | null; token_iv: string | null }>();
+
+      let plainToken: string | null = null;
+      if (botRow?.token && botRow?.token_iv) {
+        const key = await deriveKey(env.TITANIUM_API_SECRET);
+        plainToken = await decrypt(botRow.token, botRow.token_iv, key);
+      } else if (validated.token) {
+        plainToken = validated.token;
+      }
+
       if (plainToken && webhookSecret) {
         const workerUrl = `https://${request.headers.get("host") || "unknown"}`;
         const webhookUrl = `${workerUrl}/webhook/${slug}`;

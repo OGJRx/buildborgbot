@@ -36,7 +36,23 @@ export async function handleUpdate(
   host = "unknown",
 ): Promise<Response> {
   const db = env.DB;
-  const bot = new Bot<FactoryContext>(token);
+  const botIdFromToken = token.split(":")[0] ?? "0";
+  const botInfo = {
+    id: parseInt(botIdFromToken, 10),
+    is_bot: true as const,
+    first_name: botId === "botfather" ? "BuildBorg Factory" : "BuildBorg Bot",
+    username: botId === "botfather" ? "BuildBorgFactoryBot" : `buildborg_bot_${botIdFromToken}`,
+    can_join_groups: true,
+    can_read_all_group_messages: false,
+    supports_inline_queries: false,
+    can_connect_to_business: false,
+    has_main_web_app: false,
+    has_topics_enabled: false,
+    allows_users_to_create_topics: false,
+    can_manage_bots: false,
+    supports_join_request_queries: false,
+  };
+  const bot = new Bot<FactoryContext>(token, { botInfo });
 
   bot.use(async (ctx, next) => {
     ctx.env = env;

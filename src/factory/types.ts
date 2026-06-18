@@ -8,6 +8,7 @@ export interface CoreEnv {
   GEMINI_API_KEY: string;
   AI_MODEL_NAME: string;
   TITANIUM_API_SECRET: string;
+  TELEGRAM_BOT_TOKEN: string;
   MIGRATION_KEY?: string;
   ADMIN_TELEGRAM_IDS?: string;
   BOT_TOKENS: Record<string, string | undefined>;
