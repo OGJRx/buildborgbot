@@ -39,7 +39,7 @@ export function setupBotFather(bot: Bot<FactoryContext>) {
       .text("❓ Ayuda", cbHelp);
 
     await ctx.reply(
-      "🤖 <b>Bienvenido a BuildBorg Factory</b>\n\nSoy tu BotFather 2.0. Puedo crear y gestionar bots de IA personalizados para ti.\n\nUsa los botones del menú para comenzar.",
+      "🤖 <b>UNIDAD CENTRAL FACTORY</b>\n\nBienvenido al núcleo de creación. Soy el BotFather de nueva generación.\n\nOptimiza tus operaciones mediante los siguientes módulos:",
       { parse_mode: "HTML", reply_markup: keyboard },
     );
   });

@@ -1,3 +1,6 @@
+import { decrypt, deriveKey, encrypt } from "./security";
+import type { CoreEnv } from "./types";
+
 /**
  * Idempotency Check (Titanium Standard)
  */
@@ -23,19 +26,19 @@ export async function markUpdateProcessed(
 ) {
   return db
     .prepare(
-      "INSERT INTO factory_processed_updates (bot_id, update_id, processed_at) VALUES (?, ?, ?)",
+      "INSERT INTO factory_processed_updates (bot_id, update_id, processed_at) VALUES (?, ?, unixepoch())",
     )
-    .bind(botId, updateId, Date.now());
+    .bind(botId, updateId);
 }
 
 /**
  * Lazy cleanup of old processed updates (> 24h).
  */
 export async function cleanupProcessedUpdates(db: D1Database) {
-  const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
   await db
-    .prepare("DELETE FROM factory_processed_updates WHERE processed_at < ?")
-    .bind(oneDayAgo)
+    .prepare(
+      "DELETE FROM factory_processed_updates WHERE processed_at < unixepoch('now', '-1 day')",
+    )
     .run();
 }
 
@@ -59,4 +62,96 @@ export async function isAdmin(
 
   const allAdmins = [...envAdmins, ...dbAdmins].map((id) => id.trim());
   return allAdmins.includes(String(userId));
+}
+
+/**
+ * Upsert Bot Configuration (Internal Service)
+ */
+export async function upsertBotConfig(
+  db: D1Database,
+  env: CoreEnv,
+  validated: {
+    bot_id: string;
+    bot_name: string;
+    token_var_name: string;
+    system_prompt: string;
+    welcome_message: string;
+    menu_json: string;
+    token?: string | undefined;
+  },
+  host: string,
+): Promise<{ success: boolean; error?: string }> {
+  const existing = await db
+    .prepare(
+      "SELECT slug, webhook_secret, token, token_iv FROM factory_bots WHERE bot_id = ?",
+    )
+    .bind(validated.bot_id)
+    .first<{
+      slug: string;
+      webhook_secret: string;
+      token: string | null;
+      token_iv: string | null;
+    }>();
+
+  const slug = existing?.slug || validated.bot_id;
+  const webhookSecret = existing?.webhook_secret || crypto.randomUUID();
+
+  let tokenCiphertext = existing?.token || null;
+  let tokenIv = existing?.token_iv || null;
+
+  const key = await deriveKey(env.TITANIUM_API_SECRET);
+
+  if (validated.token) {
+    const encrypted = await encrypt(validated.token, key);
+    tokenCiphertext = encrypted.ciphertext;
+    tokenIv = encrypted.iv;
+  }
+
+  await db
+    .prepare(
+      "INSERT INTO factory_bots (bot_id, bot_name, token_var_name, system_prompt, welcome_message, menu_json, slug, webhook_secret, token, token_iv) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(bot_id) DO UPDATE SET bot_name=excluded.bot_name, token_var_name=excluded.token_var_name, system_prompt=excluded.system_prompt, welcome_message=excluded.welcome_message, menu_json=excluded.menu_json, token=excluded.token, token_iv=excluded.token_iv, updated_at=CURRENT_TIMESTAMP",
+    )
+    .bind(
+      validated.bot_id,
+      validated.bot_name,
+      validated.token_var_name,
+      validated.system_prompt,
+      validated.welcome_message,
+      validated.menu_json,
+      slug,
+      webhookSecret,
+      tokenCiphertext,
+      tokenIv,
+    )
+    .run();
+
+  // Auto-setWebhook logic
+  let plainToken: string | null = null;
+  if (tokenCiphertext && tokenIv) {
+    plainToken = await decrypt(tokenCiphertext, tokenIv, key);
+  } else if (validated.token) {
+    plainToken = validated.token;
+  }
+
+  if (plainToken && webhookSecret) {
+    const webhookUrl = `https://${host}/webhook/${slug}`;
+    const telegramApiUrl = `https://api.telegram.org/bot${plainToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${webhookSecret}`;
+
+    try {
+      const tgRes = await fetch(telegramApiUrl);
+      const tgData = (await tgRes.json()) as {
+        ok: boolean;
+        description?: string;
+      };
+      if (!tgData.ok) {
+        console.error(
+          `Webhook setup failed for ${validated.bot_id}: ${tgData.description}`,
+        );
+      }
+    } catch (webhookErr) {
+      console.error(`Webhook setup error for ${validated.bot_id}:`, webhookErr);
+    }
+  }
+
+  return { success: true };
 }

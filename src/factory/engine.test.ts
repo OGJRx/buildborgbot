@@ -47,6 +47,9 @@ describe("Engine Handlers Business Logic", () => {
     conversation: {
       enter: vi.fn().mockResolvedValue(undefined),
     },
+    waitUntil: vi.fn().mockImplementation(async (p) => {
+      await p;
+    }),
   } as unknown as FactoryContext;
 
   beforeEach(() => {
@@ -124,6 +127,9 @@ describe("Engine Handlers Business Logic", () => {
       mockDb.run.mockResolvedValue({ success: true, meta: { last_row_id: 1 } });
 
       await handleConfirmAndProcess(mockCtx, 123);
+      // Wait for the async processAgent() to finish
+      const promise = vi.mocked(mockCtx.waitUntil).mock.calls[0]?.[0];
+      await promise;
 
       expect(mockCtx.reply).toHaveBeenCalledWith(
         "MOCKED_AI_RESPONSE",

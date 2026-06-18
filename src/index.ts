@@ -1,6 +1,10 @@
 import type { Update } from "grammy/types";
 import { handleUpdate } from "./factory/engine";
-import { cleanupProcessedUpdates, isUpdateProcessed } from "./factory/platform";
+import {
+  cleanupProcessedUpdates,
+  isUpdateProcessed,
+  upsertBotConfig,
+} from "./factory/platform";
 import {
   ConfigSchema,
   MemoryQuerySchema,
@@ -39,7 +43,10 @@ export default {
 
     // --- Webhook Route (Titanium Slug-based) ---
     if (url.pathname.startsWith("/webhook/")) {
-      const slug = url.pathname.split("/")[2];
+      const parts = url.pathname.split("/");
+      if (parts.length !== 3)
+        return new Response("Invalid webhook path", { status: 400 });
+      const slug = parts[2];
       if (!slug) return new Response("slug required", { status: 400 });
 
       const incomingSecret = request.headers.get(
@@ -198,87 +205,14 @@ export default {
       const body = await request.json();
       const validated = ConfigSchema.parse(body);
 
-      const existing = await env.DB.prepare(
-        "SELECT slug, webhook_secret, token, token_iv FROM factory_bots WHERE bot_id = ?",
-      )
-        .bind(validated.bot_id)
-        .first<{
-          slug: string;
-          webhook_secret: string;
-          token: string | null;
-          token_iv: string | null;
-        }>();
+      const result = await upsertBotConfig(
+        env.DB,
+        env,
+        validated,
+        request.headers.get("host") || "unknown",
+      );
 
-      const slug = existing?.slug || validated.bot_id;
-      const webhookSecret = existing?.webhook_secret || crypto.randomUUID();
-
-      let tokenCiphertext = existing?.token || null;
-      let tokenIv = existing?.token_iv || null;
-
-      if (validated.token) {
-        const key = await deriveKey(env.TITANIUM_API_SECRET);
-        const encrypted = await encrypt(validated.token, key);
-        tokenCiphertext = encrypted.ciphertext;
-        tokenIv = encrypted.iv;
-      }
-
-      await env.DB.prepare(
-        "INSERT INTO factory_bots (bot_id, bot_name, token_var_name, system_prompt, welcome_message, menu_json, slug, webhook_secret, token, token_iv) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(bot_id) DO UPDATE SET bot_name=excluded.bot_name, token_var_name=excluded.token_var_name, system_prompt=excluded.system_prompt, welcome_message=excluded.welcome_message, menu_json=excluded.menu_json, token=excluded.token, token_iv=excluded.token_iv, updated_at=CURRENT_TIMESTAMP",
-      )
-        .bind(
-          validated.bot_id,
-          validated.bot_name,
-          validated.token_var_name,
-          validated.system_prompt,
-          validated.welcome_message,
-          validated.menu_json,
-          slug,
-          webhookSecret,
-          tokenCiphertext,
-          tokenIv,
-        )
-        .run();
-
-      // Auto-setWebhook logic
-      const botRow = await env.DB.prepare(
-        "SELECT token, token_iv FROM factory_bots WHERE bot_id = ?",
-      )
-        .bind(validated.bot_id)
-        .first<{ token: string | null; token_iv: string | null }>();
-
-      let plainToken: string | null = null;
-      if (botRow?.token && botRow?.token_iv) {
-        const key = await deriveKey(env.TITANIUM_API_SECRET);
-        plainToken = await decrypt(botRow.token, botRow.token_iv, key);
-      } else if (validated.token) {
-        plainToken = validated.token;
-      }
-
-      if (plainToken && webhookSecret) {
-        const workerUrl = `https://${request.headers.get("host") || "unknown"}`;
-        const webhookUrl = `${workerUrl}/webhook/${slug}`;
-        const telegramApiUrl = `https://api.telegram.org/bot${plainToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${webhookSecret}`;
-
-        try {
-          const tgRes = await fetch(telegramApiUrl);
-          const tgData = (await tgRes.json()) as {
-            ok: boolean;
-            description?: string;
-          };
-          if (!tgData.ok) {
-            console.error(
-              `Webhook setup failed for ${validated.bot_id}: ${tgData.description}`,
-            );
-          }
-        } catch (webhookErr) {
-          console.error(
-            `Webhook setup error for ${validated.bot_id}:`,
-            webhookErr,
-          );
-        }
-      }
-
-      return Response.json({ success: true });
+      return Response.json(result);
     }
 
     // --- Memory API ---

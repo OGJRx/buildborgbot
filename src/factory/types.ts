@@ -37,6 +37,7 @@ export type FactoryContext = Context &
     env: CoreEnv;
     botId: string;
     host: string;
+    waitUntil: (promise: Promise<unknown>) => void;
   };
 
 export type Menu = z.infer<typeof MenuSchema>;

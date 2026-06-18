@@ -1,4 +1,5 @@
 import type { Conversation } from "@grammyjs/conversations";
+import { upsertBotConfig } from "./platform";
 import type { FactoryContext } from "./types";
 
 type Convo = Conversation<FactoryContext, FactoryContext>;
@@ -40,26 +41,26 @@ export async function newBotConversation(
   await ctx.reply("⏳ Procesando creación...");
 
   try {
-    const response = await conversation.external(() =>
-      fetch(`https://${ctx.host}/api/factory/config`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-titanium-api-secret": ctx.env.TITANIUM_API_SECRET,
-        },
-        body: JSON.stringify({
+    const result = await conversation.external(() =>
+      upsertBotConfig(
+        ctx.env.DB,
+        ctx.env,
+        {
           bot_id: botId,
           bot_name: botName,
           token: botToken,
-          token_var_name: `BOT_TOKEN_${botId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`,
+          token_var_name: `BOT_TOKEN_${botId
+            .toUpperCase()
+            .replace(/[^A-Z0-9]/g, "_")}`,
           system_prompt: systemPrompt,
           welcome_message: `¡Hola! Soy ${botName}. ¿En qué puedo ayudarte?`,
           menu_json: "[]",
-        }),
-      }),
+        },
+        ctx.host,
+      ),
     );
 
-    if (response.ok) {
+    if (result.success) {
       await ctx.reply(
         `✅ <b>BOT CREADO</b>\n\nID: <code>${botId}</code>\nURL Webhook: <code>/webhook/${botId}</code>`,
         {
@@ -67,7 +68,9 @@ export async function newBotConversation(
         },
       );
     } else {
-      await ctx.reply(`❌ Error al crear bot: ${response.statusText}`);
+      await ctx.reply(
+        `❌ Error al crear bot: ${result.error ?? "Unknown error"}`,
+      );
     }
   } catch (err) {
     await ctx.reply(`❌ Error crítico: ${String(err)}`);
