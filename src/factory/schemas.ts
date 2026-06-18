@@ -8,6 +8,7 @@ export const ConfigSchema = z.object({
   welcome_message: z.string(),
   menu_json: z.string(),
   webhook_secret_hash: z.string().optional(),
+  token: z.string().optional(),
 });
 
 export const PatchConfigSchema = ConfigSchema.partial().omit({ bot_id: true });

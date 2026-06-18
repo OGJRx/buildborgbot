@@ -16,73 +16,58 @@ async function sync() {
   }
 
   const bots = (await response.json()) as Array<
-    FactoryBotConfig & { slug: string }
+    FactoryBotConfig & { slug: string; webhook_secret?: string }
   >;
   console.log(`Found ${bots.length} bots.`);
 
   for (const bot of bots) {
-    if (!bot.slug) {
-      console.warn(`Skipping ${bot.bot_id}: no slug configured`);
+    const { bot_id, slug, webhook_secret, token_var_name } = bot;
+
+    if (!slug) {
+      console.warn(`Skipping ${bot_id}: no slug configured`);
       continue;
     }
 
-    // Fetch webhook_secret from D1 (stored as plaintext UUID)
-    const _secretResponse = await fetch(`${WORKER_URL}/api/factory/config`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-titanium-api-secret": TITANIUM_API_SECRET,
-      },
-      body: JSON.stringify(bot),
-    });
-
-    // Get the bot's token (from env for now, migration endpoint handles D1 storage)
-    const token = process.env[bot.token_var_name];
+    // Get the bot's token from environment
+    const token = process.env[token_var_name];
     if (!token) {
-      console.warn(
-        `Skipping ${bot.bot_id}: token env ${bot.token_var_name} not found`,
-      );
+      console.warn(`Skipping ${bot_id}: token env ${token_var_name} not found`);
       continue;
     }
 
-    // We need the webhook_secret from the bot record
-    // The /api/factory/bots endpoint doesn't expose webhook_secret for security
-    // So we use the migration endpoint's pattern: fetch bot details
-    const _botDetailResponse = await fetch(
-      `${WORKER_URL}/api/factory/bots/${bot.bot_id}`,
-      {
-        headers: { "x-titanium-api-secret": TITANIUM_API_SECRET },
-      },
-    );
+    // Use existing webhook_secret or create one
+    const webhookSecret = webhook_secret || crypto.randomUUID();
+    const webhookUrl = `${WORKER_URL}/webhook/${slug}`;
 
-    // For now, generate a new webhook secret and update via migrate endpoint
-    // This is a bootstrap script — after migration, tokens live in D1
-    const webhookSecret = crypto.randomUUID();
-    const webhookUrl = `${WORKER_URL}/webhook/${bot.slug}`;
-
-    console.log(`Setting webhook for ${bot.bot_id} -> ${webhookUrl}`);
+    console.log(`Syncing webhook for ${bot_id} -> ${webhookUrl}`);
 
     const telegramUrl = `https://api.telegram.org/bot${token}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${webhookSecret}`;
 
-    const res = await fetch(telegramUrl);
-    const data = (await res.json()) as { ok: boolean; description?: string };
+    try {
+      const res = await fetch(telegramUrl);
+      const data = (await res.json()) as { ok: boolean; description?: string };
 
-    if (!data.ok) {
-      console.error(`FAILED ${bot.bot_id}: ${data.description}`);
-      continue;
+      if (!data.ok) {
+        console.error(`FAILED ${bot_id}: ${data.description}`);
+        continue;
+      }
+
+      // If we generated a new secret, persist it in D1
+      if (!webhook_secret) {
+        await fetch(`${WORKER_URL}/api/factory/bots/${bot_id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "x-titanium-api-secret": TITANIUM_API_SECRET,
+          },
+          body: JSON.stringify({ webhook_secret: webhookSecret }),
+        });
+      }
+
+      console.log(`✅ ${bot_id} webhook synced successfully`);
+    } catch (err) {
+      console.error(`ERROR syncing ${bot_id}:`, err);
     }
-
-    // Update webhook_secret in D1
-    await fetch(`${WORKER_URL}/api/factory/bots/${bot.bot_id}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        "x-titanium-api-secret": TITANIUM_API_SECRET,
-      },
-      body: JSON.stringify({ webhook_secret: webhookSecret }),
-    });
-
-    console.log(`✅ ${bot.bot_id} webhook set successfully`);
   }
 }
 

@@ -23,13 +23,13 @@ export async function newBotConversation(
   const botName = botNameMsg.message.text;
 
   await ctx.reply(
-    "🔑 Ingresa el nombre de la variable de entorno del token (ej: <code>MY_BOT_TOKEN</code>):",
+    "🔑 Ingresa el <b>Telegram Bot Token</b> (ej: <code>12345:ABCDE...</code>):",
     {
       parse_mode: "HTML",
     },
   );
-  const tokenVarMsg = await conversation.waitFor("message:text");
-  const tokenVarName = tokenVarMsg.message.text;
+  const tokenMsg = await conversation.waitFor("message:text");
+  const botToken = tokenMsg.message.text;
 
   await ctx.reply("📜 Ingresa el System Prompt (instrucciones de IA):", {
     parse_mode: "HTML",
@@ -50,7 +50,8 @@ export async function newBotConversation(
         body: JSON.stringify({
           bot_id: botId,
           bot_name: botName,
-          token_var_name: tokenVarName,
+          token: botToken,
+          token_var_name: `BOT_TOKEN_${botId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`,
           system_prompt: systemPrompt,
           welcome_message: `¡Hola! Soy ${botName}. ¿En qué puedo ayudarte?`,
           menu_json: "[]",

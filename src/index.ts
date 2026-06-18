@@ -174,16 +174,31 @@ export default {
       const validated = ConfigSchema.parse(body);
 
       const existing = await env.DB.prepare(
-        "SELECT slug, webhook_secret FROM factory_bots WHERE bot_id = ?",
+        "SELECT slug, webhook_secret, token, token_iv FROM factory_bots WHERE bot_id = ?",
       )
         .bind(validated.bot_id)
-        .first<{ slug: string; webhook_secret: string }>();
+        .first<{
+          slug: string;
+          webhook_secret: string;
+          token: string | null;
+          token_iv: string | null;
+        }>();
 
       const slug = existing?.slug || validated.bot_id;
       const webhookSecret = existing?.webhook_secret || crypto.randomUUID();
 
+      let tokenCiphertext = existing?.token || null;
+      let tokenIv = existing?.token_iv || null;
+
+      if (validated.token) {
+        const key = await deriveKey(env.TITANIUM_API_SECRET);
+        const encrypted = await encrypt(validated.token, key);
+        tokenCiphertext = encrypted.ciphertext;
+        tokenIv = encrypted.iv;
+      }
+
       await env.DB.prepare(
-        "INSERT INTO factory_bots (bot_id, bot_name, token_var_name, system_prompt, welcome_message, menu_json, slug, webhook_secret) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(bot_id) DO UPDATE SET bot_name=excluded.bot_name, token_var_name=excluded.token_var_name, system_prompt=excluded.system_prompt, welcome_message=excluded.welcome_message, menu_json=excluded.menu_json, updated_at=CURRENT_TIMESTAMP",
+        "INSERT INTO factory_bots (bot_id, bot_name, token_var_name, system_prompt, welcome_message, menu_json, slug, webhook_secret, token, token_iv) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(bot_id) DO UPDATE SET bot_name=excluded.bot_name, token_var_name=excluded.token_var_name, system_prompt=excluded.system_prompt, welcome_message=excluded.welcome_message, menu_json=excluded.menu_json, token=excluded.token, token_iv=excluded.token_iv, updated_at=CURRENT_TIMESTAMP",
       )
         .bind(
           validated.bot_id,
@@ -194,35 +209,35 @@ export default {
           validated.menu_json,
           slug,
           webhookSecret,
+          tokenCiphertext,
+          tokenIv,
         )
         .run();
 
-      // Auto-setWebhook para bots nuevos (cuando no tiene token en D1 aún)
-      const isNewBot = !existing;
-      if (isNewBot && validated.token_var_name) {
-        const plainToken = env.BOT_TOKENS[validated.token_var_name];
-        if (plainToken && webhookSecret) {
-          const workerUrl = `https://${request.headers.get("host") || "unknown"}`;
-          const webhookUrl = `${workerUrl}/webhook/${slug}`;
-          const telegramApiUrl = `https://api.telegram.org/bot${plainToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${webhookSecret}`;
+      // Auto-setWebhook logic
+      const plainToken =
+        validated.token || env.BOT_TOKENS[validated.token_var_name];
+      if (plainToken && webhookSecret) {
+        const workerUrl = `https://${request.headers.get("host") || "unknown"}`;
+        const webhookUrl = `${workerUrl}/webhook/${slug}`;
+        const telegramApiUrl = `https://api.telegram.org/bot${plainToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${webhookSecret}`;
 
-          try {
-            const tgRes = await fetch(telegramApiUrl);
-            const tgData = (await tgRes.json()) as {
-              ok: boolean;
-              description?: string;
-            };
-            if (!tgData.ok) {
-              console.error(
-                `Webhook setup failed for ${validated.bot_id}: ${tgData.description}`,
-              );
-            }
-          } catch (webhookErr) {
+        try {
+          const tgRes = await fetch(telegramApiUrl);
+          const tgData = (await tgRes.json()) as {
+            ok: boolean;
+            description?: string;
+          };
+          if (!tgData.ok) {
             console.error(
-              `Webhook setup error for ${validated.bot_id}:`,
-              webhookErr,
+              `Webhook setup failed for ${validated.bot_id}: ${tgData.description}`,
             );
           }
+        } catch (webhookErr) {
+          console.error(
+            `Webhook setup error for ${validated.bot_id}:`,
+            webhookErr,
+          );
         }
       }
 
@@ -371,7 +386,7 @@ export default {
         return new Response("Unauthorized", { status: 401 });
       }
       const bots = await env.DB.prepare(
-        "SELECT bot_id, bot_name, token_var_name, system_prompt, welcome_message, menu_json, slug FROM factory_bots",
+        "SELECT bot_id, bot_name, token_var_name, system_prompt, welcome_message, menu_json, slug, webhook_secret FROM factory_bots",
       ).all();
       return Response.json(bots.results);
     }

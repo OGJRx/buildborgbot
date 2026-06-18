@@ -107,7 +107,8 @@ describe("Worker Entry Point", () => {
     expect(mockDb.prepare).toHaveBeenCalledWith(
       expect.stringContaining("INSERT INTO factory_bots"),
     );
-    expect(mockDb.bind).toHaveBeenCalledWith(
+    expect(mockDb.bind).toHaveBeenNthCalledWith(
+      2,
       config.bot_id,
       config.bot_name,
       config.token_var_name,
@@ -116,6 +117,8 @@ describe("Worker Entry Point", () => {
       config.menu_json,
       "bot1-slug",
       "uuid-secret",
+      null,
+      null,
     );
   });
 });
