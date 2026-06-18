@@ -36,11 +36,11 @@ export async function getCircuitBreaker(
 }
 
 export async function reportFailure(db: D1Database, botId: string) {
-  const now = Date.now();
+  const now = Date.now(); // Internal MS for calculations
   const cb = await getCircuitBreaker(db, botId);
 
   let newCount = cb.failure_count + 1;
-  let newState = cb.state;
+  let newState: "CLOSED" | "OPEN" = cb.state;
   let openedAt = cb.opened_at;
 
   // Reset count if last failure was outside the window
@@ -55,9 +55,15 @@ export async function reportFailure(db: D1Database, botId: string) {
 
   await db
     .prepare(
-      "INSERT INTO factory_circuit_breaker (bot_id, state, failure_count, last_failure_at, opened_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(bot_id) DO UPDATE SET state=excluded.state, failure_count=excluded.failure_count, last_failure_at=excluded.last_failure_at, opened_at=excluded.opened_at",
+      `INSERT INTO factory_circuit_breaker (bot_id, state, failure_count, last_failure_at, opened_at)
+       VALUES (?, ?, ?, unixepoch(), ${openedAt === now ? "unixepoch()" : "?"})
+       ON CONFLICT(bot_id) DO UPDATE SET state=excluded.state, failure_count=excluded.failure_count, last_failure_at=excluded.last_failure_at, opened_at=excluded.opened_at`,
     )
-    .bind(botId, newState, newCount, now, openedAt)
+    .bind(
+      ...(openedAt === now
+        ? [botId, newState, newCount]
+        : [botId, newState, newCount, Math.floor(openedAt / 1000)]),
+    )
     .run();
 }
 
@@ -82,8 +88,9 @@ export async function canProceed(
   const cb = await getCircuitBreaker(db, botId);
   if (cb.state === "CLOSED") return true;
 
-  const now = Date.now();
-  if (now - cb.opened_at > CB_COOLDOWN_MS) {
+  const now = Math.floor(Date.now() / 1000);
+  const openedAt = cb.opened_at; // now stored in seconds
+  if (now - openedAt > Math.floor(CB_COOLDOWN_MS / 1000)) {
     return true; // Cooldown passed, next request is a test
   }
 
@@ -98,9 +105,16 @@ export async function checkRateLimit(
   botId: string,
   limit = 15,
 ): Promise<{ allowed: boolean; remainingSeconds: number }> {
+  // Use UTC to avoid timezone issues in Worker environment
   const now = new Date();
-  const windowKey = now.toISOString().substring(0, 16).replace(/[-:T]/g, ""); // YYYYMMDDHHmm
-  const secondsInMinute = now.getSeconds();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(now.getUTCDate()).padStart(2, "0");
+  const hour = String(now.getUTCHours()).padStart(2, "0");
+  const min = String(now.getUTCMinutes()).padStart(2, "0");
+
+  const windowKey = `${year}${month}${day}${hour}${min}`; // YYYYMMDDHHmm
+  const secondsInMinute = now.getUTCSeconds();
   const remainingSeconds = 60 - secondsInMinute;
 
   const result = await db

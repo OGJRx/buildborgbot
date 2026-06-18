@@ -20,15 +20,12 @@ export async function buildCallback(
   data: CallbackData,
   ttlSeconds = 86400,
 ): Promise<string> {
-  const now = Date.now();
-  const expiresAt = now + ttlSeconds * 1000;
-
-  // Insert into D1 to get the reference (ID)
+  // Insert into D1 to get the reference (ID) using SQLite's unixepoch
   const result = await db
     .prepare(
-      "INSERT INTO factory_callback_tokens (bot_id, action, payload, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO factory_callback_tokens (bot_id, action, payload, created_at, expires_at) VALUES (?, ?, ?, unixepoch(), unixepoch() + ?)",
     )
-    .bind(data.bot_id, data.action, data.payload, now, expiresAt)
+    .bind(data.bot_id, data.action, data.payload, ttlSeconds)
     .run();
 
   const ref = result.meta.last_row_id;
@@ -78,8 +75,9 @@ export async function parseCallback(
   // Multi-tenant isolation: check bot_id
   if (row.bot_id !== botId) return null;
 
-  // Check expiration
-  if (Date.now() > row.expires_at) return null;
+  // Check expiration (row.expires_at is in seconds from unixepoch())
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (nowSeconds > row.expires_at) return null;
 
   // Validate signature
   const sigInput = `${ref}${row.bot_id}${row.action}${row.payload}`;
@@ -99,7 +97,8 @@ export async function parseCallback(
  */
 export async function cleanupExpiredCallbacks(db: D1Database): Promise<void> {
   await db
-    .prepare("DELETE FROM factory_callback_tokens WHERE expires_at < ?")
-    .bind(Date.now())
+    .prepare(
+      "DELETE FROM factory_callback_tokens WHERE expires_at < unixepoch()",
+    )
     .run();
 }

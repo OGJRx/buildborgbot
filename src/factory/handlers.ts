@@ -167,30 +167,35 @@ export async function handleConfirmAndProcess(
     systemInstruction += `\n\n[CONTEXTO PREVIO]:\n${budget.summaryContext}`;
   }
 
-  try {
-    const result = await runAgent(db, {
-      botId: botId,
-      systemInstruction: systemInstruction,
-      contents: contents,
-      apiKey: ctx.env.GEMINI_API_KEY,
-      modelName: ctx.env.AI_MODEL_NAME,
-    });
+  const processAgent = async () => {
+    try {
+      const result = await runAgent(db, {
+        botId: botId,
+        systemInstruction: systemInstruction,
+        contents: contents,
+        apiKey: ctx.env.GEMINI_API_KEY,
+        modelName: ctx.env.AI_MODEL_NAME,
+      });
 
-    const responseBlocks = smartSplitHtml(result.text);
+      const responseBlocks = smartSplitHtml(result.text);
 
-    for (const block of responseBlocks) {
-      const sentMsg = await ctx.reply(block, { parse_mode: "HTML" });
-      await db
-        .prepare(
-          "INSERT INTO factory_messages (bot_id, chat_id, message_id, role, content) VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(botId, chatId, sentMsg.message_id, "model", block)
-        .run();
+      for (const block of responseBlocks) {
+        const sentMsg = await ctx.reply(block, { parse_mode: "HTML" });
+        await db
+          .prepare(
+            "INSERT INTO factory_messages (bot_id, chat_id, message_id, role, content) VALUES (?, ?, ?, ?, ?)",
+          )
+          .bind(botId, chatId, sentMsg.message_id, "model", block)
+          .run();
+      }
+    } catch (err) {
+      console.error("Agent Error:", err);
+      await ctx.reply("❌ Error de procesamiento. Intenta de nuevo.");
     }
-  } catch (err) {
-    console.error("Agent Error:", err);
-    await ctx.reply("❌ Error de procesamiento. Intenta de nuevo.");
-  }
+  };
+
+  // Ensure Gemini and D1 insertion are tracked by the Worker lifecycle
+  ctx.waitUntil(processAgent());
 }
 
 export async function handleSummarize(ctx: FactoryContext) {

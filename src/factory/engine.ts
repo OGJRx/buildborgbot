@@ -36,12 +36,29 @@ export async function handleUpdate(
   host = "unknown",
 ): Promise<Response> {
   const db = env.DB;
-  const botIdFromToken = token.split(":")[0] ?? "0";
+
+  // Validate token format (Titanium Guard)
+  if (!token || !token.includes(":") || token.length < 10) {
+    console.error(`[FATAL] Invalid token for bot ${botId}`);
+    return new Response("Unauthorized: Invalid Token Format", { status: 401 });
+  }
+
+  const botIdFromToken = token.split(":")[0];
+  const parsedId = Number.parseInt(botIdFromToken ?? "0", 10);
+
+  if (Number.isNaN(parsedId) || parsedId === 0) {
+    console.error(`[FATAL] Could not derive ID from token for bot ${botId}`);
+    return new Response("Unauthorized: Malformed Token", { status: 401 });
+  }
+
   const botInfo = {
-    id: parseInt(botIdFromToken, 10),
+    id: parsedId,
     is_bot: true as const,
     first_name: botId === "botfather" ? "BuildBorg Factory" : "BuildBorg Bot",
-    username: botId === "botfather" ? "BuildBorgFactoryBot" : `buildborg_bot_${botIdFromToken}`,
+    username:
+      botId === "botfather"
+        ? "BuildBorgFactoryBot"
+        : `buildborg_bot_${botIdFromToken}`,
     can_join_groups: true,
     can_read_all_group_messages: false,
     supports_inline_queries: false,
@@ -58,6 +75,7 @@ export async function handleUpdate(
     ctx.env = env;
     ctx.botId = botId;
     ctx.host = host;
+    ctx.waitUntil = waitUntil;
     await next();
   });
 
@@ -113,8 +131,12 @@ export async function handleUpdate(
 
   // Mark processed and run update in parallel
   const runUpdate = async () => {
-    await bot.handleUpdate(update);
-    await (await markUpdateProcessed(db, botId, update.update_id)).run();
+    try {
+      await bot.handleUpdate(update);
+      await (await markUpdateProcessed(db, botId, update.update_id)).run();
+    } catch (e) {
+      console.error(`[UPDATE_FAILURE] bot=${botId} err=${String(e)}`);
+    }
   };
 
   waitUntil(runUpdate());
