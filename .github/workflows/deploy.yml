@@ -41,14 +41,25 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
-      - name: Deploy Worker
+      - name: Set Cloudflare Secrets
         uses: cloudflare/wrangler-action@v3
         with:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: |
+            secret put GEMINI_API_KEY --json '{"value": "${{ secrets.GEMINI_API_KEY }}"}'
+            secret put TITANIUM_API_SECRET --json '{"value": "${{ secrets.TITANIUM_API_SECRET }}"}'
+            secret put MIGRATION_KEY --json '{"value": "${{ secrets.MIGRATION_KEY }}"}'
+            secret put TELEGRAM_BOT_TOKEN --json '{"value": "${{ secrets.TELEGRAM_BOT_TOKEN }}"}'
+            secret put ADMIN_TELEGRAM_IDS --json '{"value": "${{ secrets.ADMIN_TELEGRAM_IDS }}"}'
       - name: Apply D1 Migrations
         uses: cloudflare/wrangler-action@v3
         with:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           command: d1 migrations apply bot_factory_db --remote
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
