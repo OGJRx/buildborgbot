@@ -36,40 +36,45 @@ export async function getCircuitBreaker(
 }
 
 export async function reportFailure(db: D1Database, botId: string) {
-  const now = Date.now(); // Internal MS for calculations
-  const cb = await getCircuitBreaker(db, botId);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const windowSec = Math.floor(CB_WINDOW_MS / 1000);
 
-  let newCount = cb.failure_count + 1;
-  let newState: "CLOSED" | "OPEN" = cb.state;
-  let openedAt = cb.opened_at;
-
-  // Reset count if last failure was outside the window
-  if (now - cb.last_failure_at > CB_WINDOW_MS) {
-    newCount = 1;
-  }
-
-  if (newCount >= CB_THRESHOLD) {
-    newState = "OPEN";
-    openedAt = now;
-  }
-
-  if (openedAt === now) {
-    // Freshly opened breaker
-    await db
-      .prepare(
-        "INSERT INTO factory_circuit_breaker (bot_id, state, failure_count, last_failure_at, opened_at) VALUES (?, ?, ?, unixepoch(), unixepoch()) ON CONFLICT(bot_id) DO UPDATE SET state=excluded.state, failure_count=excluded.failure_count, last_failure_at=excluded.last_failure_at, opened_at=excluded.opened_at",
-      )
-      .bind(botId, newState, newCount)
-      .run();
-  } else {
-    // Continue with existing opened_at
-    await db
-      .prepare(
-        "INSERT INTO factory_circuit_breaker (bot_id, state, failure_count, last_failure_at, opened_at) VALUES (?, ?, ?, unixepoch(), ?) ON CONFLICT(bot_id) DO UPDATE SET state=excluded.state, failure_count=excluded.failure_count, last_failure_at=excluded.last_failure_at, opened_at=excluded.opened_at",
-      )
-      .bind(botId, newState, newCount, Math.floor(openedAt / 1000))
-      .run();
-  }
+  // Atomic update: increment failure_count, or reset if window passed.
+  // Open breaker if threshold reached.
+  await db
+    .prepare(
+      `INSERT INTO factory_circuit_breaker (bot_id, state, failure_count, last_failure_at, opened_at)
+       VALUES (?, 'CLOSED', 1, ?, 0)
+       ON CONFLICT(bot_id) DO UPDATE SET
+         failure_count = CASE
+           WHEN (? - last_failure_at) > ? THEN 1
+           ELSE failure_count + 1
+         END,
+         state = CASE
+           WHEN (CASE WHEN (? - last_failure_at) > ? THEN 1 ELSE failure_count + 1 END) >= ? THEN 'OPEN'
+           ELSE state
+         END,
+         opened_at = CASE
+           WHEN (CASE WHEN (? - last_failure_at) > ? THEN 1 ELSE failure_count + 1 END) >= ? AND state = 'CLOSED' THEN ?
+           ELSE opened_at
+         END,
+         last_failure_at = ?`,
+    )
+    .bind(
+      botId,
+      nowSec,
+      nowSec,
+      windowSec,
+      nowSec,
+      windowSec,
+      CB_THRESHOLD,
+      nowSec,
+      windowSec,
+      CB_THRESHOLD,
+      nowSec,
+      nowSec,
+    )
+    .run();
 }
 
 export async function reportSuccess(db: D1Database, botId: string) {

@@ -57,7 +57,7 @@ export default {
 
       // Special case: BotFather admin bot (not in factory_bots table)
       if (slug === "botfather") {
-        if (!timingSafeEqual(incomingSecret, env.TITANIUM_API_SECRET)) {
+        if (!(await timingSafeEqual(incomingSecret, env.TITANIUM_API_SECRET))) {
           return new Response("Forbidden: Invalid secret", { status: 403 });
         }
 
@@ -95,7 +95,7 @@ export default {
       if (!botConfig) return new Response("Bot not found", { status: 404 });
 
       // Validate webhook secret (Timing-safe comparison)
-      if (!timingSafeEqual(incomingSecret, botConfig.webhook_secret)) {
+      if (!(await timingSafeEqual(incomingSecret, botConfig.webhook_secret))) {
         return new Response("Forbidden: Invalid secret", { status: 403 });
       }
 

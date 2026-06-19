@@ -9,21 +9,23 @@ export async function newBotConversation(
   conversation: Convo,
   ctx: FactoryContext,
 ): Promise<void> {
-  assertEnv(ctx);
   await ctx.reply(
     "🆕 <b>NUEVO BOT BORG</b>\n\nIngresa el ID único del bot (slug):",
     {
       parse_mode: "HTML",
     },
   );
-  const botIdMsg = await conversation.waitFor("message:text");
+  const botIdMsg = await conversation.waitFor("message:text", {
+    maxMilliseconds: 5 * 60 * 1000,
+  });
   const botId = botIdMsg.message.text.trim();
 
   // Validation: alpha-numeric, underscores, dashes, 1-64 chars.
   const botIdRegex = /^[a-zA-Z0-9_-]{1,64}$/;
-  if (!botIdRegex.test(botId)) {
+  const reservedSlugs = ["botfather", "api", "health", "webhook"];
+  if (!botIdRegex.test(botId) || reservedSlugs.includes(botId.toLowerCase())) {
     await ctx.reply(
-      "❌ <b>ID INVÁLIDO</b>\n\nEl ID solo puede contener letras, números, guiones y guiones bajos (máx 64 caracteres). Reinicia el proceso con /newbot.",
+      "❌ <b>ID INVÁLIDO</b>\n\nEl ID solo puede contener letras, números, guiones y guiones bajos (máx 64 caracteres), y no puede ser una palabra reservada. Reinicia el proceso con /newbot.",
       { parse_mode: "HTML" },
     );
     return;
@@ -32,7 +34,9 @@ export async function newBotConversation(
   await ctx.reply("📛 Ingresa el nombre público del bot:", {
     parse_mode: "HTML",
   });
-  const botNameMsg = await conversation.waitFor("message:text");
+  const botNameMsg = await conversation.waitFor("message:text", {
+    maxMilliseconds: 5 * 60 * 1000,
+  });
   const botName = botNameMsg.message.text;
 
   await ctx.reply(
@@ -41,13 +45,17 @@ export async function newBotConversation(
       parse_mode: "HTML",
     },
   );
-  const tokenMsg = await conversation.waitFor("message:text");
+  const tokenMsg = await conversation.waitFor("message:text", {
+    maxMilliseconds: 5 * 60 * 1000,
+  });
   const botToken = tokenMsg.message.text;
 
   await ctx.reply("📜 Ingresa el System Prompt (instrucciones de IA):", {
     parse_mode: "HTML",
   });
-  const promptMsg = await conversation.waitFor("message:text");
+  const promptMsg = await conversation.waitFor("message:text", {
+    maxMilliseconds: 5 * 60 * 1000,
+  });
   const systemPrompt = promptMsg.message.text;
 
   await promptMsg.reply("⏳ Procesando creación...");

@@ -76,22 +76,36 @@ export async function decrypt(
 
 /**
  * Constant-time comparison to prevent timing attacks.
- * Uses a double-hmac or padding approach to avoid length leaks.
+ * Uses a double-HMAC pattern to ensure constant time regardless of input length.
  */
-export function timingSafeEqual(a?: string | null, b?: string | null): boolean {
+export async function timingSafeEqual(
+  a?: string | null,
+  b?: string | null,
+): Promise<boolean> {
   if (!a || !b) return false;
-  const lenA = a.length;
-  const lenB = b.length;
 
-  // We compare up to the max length to avoid early return on length mismatch.
-  // However, charCodeAt on undefined will return NaN which we handle with || 0.
-  let result = lenA ^ lenB;
-  const maxLen = Math.max(lenA, lenB);
+  const encoder = new TextEncoder();
+  // Use a random key for HMAC to prevent pre-computation attacks
+  const keyData = crypto.getRandomValues(new Uint8Array(32));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    keyData,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
 
-  for (let i = 0; i < maxLen; i++) {
-    const charA = i < lenA ? a.charCodeAt(i) : 0;
-    const charB = i < lenB ? b.charCodeAt(i) : 0;
-    result |= charA ^ charB;
+  const macA = await crypto.subtle.sign("HMAC", key, encoder.encode(a));
+  const macB = await crypto.subtle.sign("HMAC", key, encoder.encode(b));
+
+  const aUint = new Uint8Array(macA);
+  const bUint = new Uint8Array(macB);
+
+  if (aUint.length !== bUint.length) return false;
+
+  let result = 0;
+  for (let i = 0; i < aUint.length; i++) {
+    result |= (aUint[i] ?? 0) ^ (bUint[i] ?? 0);
   }
   return result === 0;
 }
