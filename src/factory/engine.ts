@@ -27,6 +27,8 @@ import type { CoreEnv, FactoryContext, Menu } from "./types";
 
 // --- FACTORY ENGINE ---
 
+const botCache = new Map<string, Bot<FactoryContext>>();
+
 const sessionAdapterCache = new Map<
   D1Database,
   StorageAdapter<Record<string, unknown>>
@@ -78,74 +80,79 @@ export async function handleUpdate(
     can_manage_bots: false,
     supports_join_request_queries: false,
   };
-  const bot = new Bot<FactoryContext>(token, { botInfo });
 
-  bot.use(async (ctx, next) => {
-    ctx.env = env;
-    ctx.botId = botId;
-    ctx.host = host;
-    ctx.waitUntil = waitUntil;
-    await next();
-  });
+  let bot = botCache.get(token);
+  if (!bot) {
+    bot = new Bot<FactoryContext>(token, { botInfo });
+    botCache.set(token, bot);
 
-  // Session storage
-  let sessionAdapter = sessionAdapterCache.get(db);
-  if (!sessionAdapter) {
-    const sessionRaw = await D1Adapter.create<Record<string, unknown>>(
-      db,
-      "factory_sessions",
-    );
-    sessionAdapter = {
-      read: (key) => sessionRaw.read(key),
-      write: (key, value) => sessionRaw.write(key, value),
-      delete: (key) => sessionRaw.delete(key),
-    };
-    sessionAdapterCache.set(db, sessionAdapter);
-  }
+    bot.use(async (ctx, next) => {
+      ctx.env = env;
+      ctx.botId = botId;
+      ctx.host = host;
+      ctx.waitUntil = waitUntil;
+      await next();
+    });
 
-  bot.use(
-    session({
-      initial: () => ({}),
-      storage: sessionAdapter,
-      getSessionKey: (ctx) => {
-        const chatId = ctx.chat?.id.toString() ?? "unknown";
-        return `session:${chatId}:${ctx.botId}`;
-      },
-    }),
-  );
+    // Session storage
+    let sessionAdapter = sessionAdapterCache.get(db);
+    if (!sessionAdapter) {
+      const sessionRaw = await D1Adapter.create<Record<string, unknown>>(
+        db,
+        "factory_sessions",
+      );
+      sessionAdapter = {
+        read: (key) => sessionRaw.read(key),
+        write: (key, value) => sessionRaw.write(key, value),
+        delete: (key) => sessionRaw.delete(key),
+      };
+      sessionAdapterCache.set(db, sessionAdapter);
+    }
 
-  // Conversation storage
-  let convoAdapter = convoAdapterCache.get(db);
-  if (!convoAdapter) {
-    const convoRaw = await D1Adapter.create<VersionedState<ConversationData>>(
-      db,
-      "factory_sessions",
-    );
-    convoAdapter = {
-      read: (key) => convoRaw.read(key),
-      write: (key, value) => convoRaw.write(key, value),
-      delete: (key) => convoRaw.delete(key),
-    };
-    convoAdapterCache.set(db, convoAdapter);
-  }
-
-  bot.use(
-    conversations({
-      storage: {
-        type: "key",
-        adapter: convoAdapter,
-        getStorageKey: (ctx: Context & { botId: string }) => {
+    bot.use(
+      session({
+        initial: () => ({}),
+        storage: sessionAdapter,
+        getSessionKey: (ctx) => {
           const chatId = ctx.chat?.id.toString() ?? "unknown";
-          return `convo:${chatId}:${ctx.botId}`;
+          return `session:${chatId}:${ctx.botId}`;
         },
-      },
-    }),
-  );
+      }),
+    );
 
-  if (botId === "botfather") {
-    setupBotFather(botId, bot);
-  } else {
-    setupBot(botId, bot, waitUntil);
+    // Conversation storage
+    let convoAdapter = convoAdapterCache.get(db);
+    if (!convoAdapter) {
+      const convoRaw = await D1Adapter.create<VersionedState<ConversationData>>(
+        db,
+        "factory_sessions",
+      );
+      convoAdapter = {
+        read: (key) => convoRaw.read(key),
+        write: (key, value) => convoRaw.write(key, value),
+        delete: (key) => convoRaw.delete(key),
+      };
+      convoAdapterCache.set(db, convoAdapter);
+    }
+
+    bot.use(
+      conversations({
+        storage: {
+          type: "key",
+          adapter: convoAdapter,
+          getStorageKey: (ctx: Context & { botId: string }) => {
+            const chatId = ctx.chat?.id.toString() ?? "unknown";
+            return `convo:${chatId}:${ctx.botId}`;
+          },
+        },
+      }),
+    );
+
+    if (botId === "botfather") {
+      setupBotFather(botId, bot);
+    } else {
+      setupBot(botId, bot);
+    }
   }
 
   // Mark processed and run update in parallel
@@ -171,11 +178,7 @@ export async function handleUpdate(
   return new Response("OK");
 }
 
-function setupBot(
-  botId: string,
-  bot: Bot<FactoryContext>,
-  _waitUntil: (p: Promise<unknown>) => void,
-) {
+function setupBot(botId: string, bot: Bot<FactoryContext>) {
   bot.use(createConversation(feedbackConversation));
 
   bot.command("start", async (ctx) => {
@@ -345,7 +348,7 @@ function setupBot(
     );
   });
 
-  bot.catch((err) => {
+  bot.catch(async (err) => {
     console.error(
       JSON.stringify({
         level: "error",
@@ -355,6 +358,15 @@ function setupBot(
         timestamp: new Date().toISOString(),
       }),
     );
+    try {
+      if (err.ctx) {
+        await err.ctx.reply("⚠️ Error interno. Por favor, intenta de nuevo.", {
+          parse_mode: "HTML",
+        });
+      }
+    } catch (_replyErr) {
+      // Ignore errors during reply in catch
+    }
   });
 }
 

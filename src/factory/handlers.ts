@@ -36,17 +36,24 @@ export function smartSplitHtml(text: string, maxLength = 4000): string[] {
     const tags = ["b", "i", "code", "pre", "em", "strong", "blockquote", "a"];
     const openTags: string[] = [];
     // Enhanced regex to capture full opening tag including attributes for <a>
-    const tagRegex = /<(\/)?([a-z1-6]+)([^>]*)>/gi;
+    // Handles self-closing tags and ignores them for stack tracking
+    const tagRegex = /<(\/)?([a-z1-6]+)([^>]*?)(\/)?>/gi;
 
     let match = tagRegex.exec(block);
     while (match !== null) {
       const isClosing = !!match[1];
       const tagName = match[2]?.toLowerCase() || "";
       const attributes = match[3];
+      const isSelfClosing = !!match[4];
 
-      if (tags.includes(tagName)) {
+      if (tags.includes(tagName) && !isSelfClosing) {
         if (isClosing) {
-          openTags.pop();
+          const index = openTags.findLastIndex(
+            (t) => t.split(" ")[0] === tagName,
+          );
+          if (index !== -1) {
+            openTags.splice(index, 1);
+          }
         } else {
           openTags.push(tagName + (attributes || ""));
         }
@@ -54,7 +61,7 @@ export function smartSplitHtml(text: string, maxLength = 4000): string[] {
       match = tagRegex.exec(block);
     }
 
-    // Close open tags at the end of block
+    // Close open tags at the end of block in reverse order
     for (let i = openTags.length - 1; i >= 0; i--) {
       const tagInfo = openTags[i];
       if (tagInfo) {

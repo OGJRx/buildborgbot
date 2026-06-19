@@ -5,7 +5,7 @@ compatibility_date = "2026-06-18"
 preview_urls = false
 
 [vars]
-AI_MODEL_NAME = "gemini-3.5-flash"
+AI_MODEL_NAME = "gemini-1.5-flash"
 
 [[d1_databases]]
 binding = "DB"
