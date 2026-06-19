@@ -96,7 +96,7 @@ export async function handleUpdate(
       storage: sessionAdapter,
       getSessionKey: (ctx) => {
         const chatId = ctx.chat?.id.toString() ?? "unknown";
-        return `${chatId}:${ctx.botId}`;
+        return `session:${chatId}:${ctx.botId}`;
       },
     }),
   );
@@ -117,7 +117,7 @@ export async function handleUpdate(
         },
         getStorageKey: (ctx: Context & { botId: string }) => {
           const chatId = ctx.chat?.id.toString() ?? "unknown";
-          return `${chatId}:${ctx.botId}`;
+          return `convo:${chatId}:${ctx.botId}`;
         },
       },
     }),
