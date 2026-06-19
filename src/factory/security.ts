@@ -76,14 +76,22 @@ export async function decrypt(
 
 /**
  * Constant-time comparison to prevent timing attacks.
+ * Uses a double-hmac or padding approach to avoid length leaks.
  */
 export function timingSafeEqual(a?: string | null, b?: string | null): boolean {
-  if (!a || !b || a.length !== b.length) {
-    return false;
-  }
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  if (!a || !b) return false;
+  const lenA = a.length;
+  const lenB = b.length;
+
+  // We compare up to the max length to avoid early return on length mismatch.
+  // However, charCodeAt on undefined will return NaN which we handle with || 0.
+  let result = lenA ^ lenB;
+  const maxLen = Math.max(lenA, lenB);
+
+  for (let i = 0; i < maxLen; i++) {
+    const charA = i < lenA ? a.charCodeAt(i) : 0;
+    const charB = i < lenB ? b.charCodeAt(i) : 0;
+    result |= charA ^ charB;
   }
   return result === 0;
 }

@@ -27,6 +27,15 @@ import type { CoreEnv, FactoryContext, Menu } from "./types";
 
 // --- FACTORY ENGINE ---
 
+const sessionAdapterCache = new Map<
+  D1Database,
+  StorageAdapter<Record<string, unknown>>
+>();
+const convoAdapterCache = new Map<
+  D1Database,
+  StorageAdapter<VersionedState<ConversationData>>
+>();
+
 export async function handleUpdate(
   botId: string,
   token: string,
@@ -80,15 +89,19 @@ export async function handleUpdate(
   });
 
   // Session storage
-  const sessionRaw = await D1Adapter.create<Record<string, unknown>>(
-    db,
-    "factory_sessions",
-  );
-  const sessionAdapter: StorageAdapter<Record<string, unknown>> = {
-    read: (key) => sessionRaw.read(key),
-    write: (key, value) => sessionRaw.write(key, value),
-    delete: (key) => sessionRaw.delete(key),
-  };
+  let sessionAdapter = sessionAdapterCache.get(db);
+  if (!sessionAdapter) {
+    const sessionRaw = await D1Adapter.create<Record<string, unknown>>(
+      db,
+      "factory_sessions",
+    );
+    sessionAdapter = {
+      read: (key) => sessionRaw.read(key),
+      write: (key, value) => sessionRaw.write(key, value),
+      delete: (key) => sessionRaw.delete(key),
+    };
+    sessionAdapterCache.set(db, sessionAdapter);
+  }
 
   bot.use(
     session({
@@ -102,19 +115,25 @@ export async function handleUpdate(
   );
 
   // Conversation storage
-  const convoRaw = await D1Adapter.create<VersionedState<ConversationData>>(
-    db,
-    "factory_sessions",
-  );
+  let convoAdapter = convoAdapterCache.get(db);
+  if (!convoAdapter) {
+    const convoRaw = await D1Adapter.create<VersionedState<ConversationData>>(
+      db,
+      "factory_sessions",
+    );
+    convoAdapter = {
+      read: (key) => convoRaw.read(key),
+      write: (key, value) => convoRaw.write(key, value),
+      delete: (key) => convoRaw.delete(key),
+    };
+    convoAdapterCache.set(db, convoAdapter);
+  }
+
   bot.use(
     conversations({
       storage: {
         type: "key",
-        adapter: {
-          read: (key) => convoRaw.read(key),
-          write: (key, value) => convoRaw.write(key, value),
-          delete: (key) => convoRaw.delete(key),
-        },
+        adapter: convoAdapter,
         getStorageKey: (ctx: Context & { botId: string }) => {
           const chatId = ctx.chat?.id.toString() ?? "unknown";
           return `convo:${chatId}:${ctx.botId}`;
@@ -124,9 +143,9 @@ export async function handleUpdate(
   );
 
   if (botId === "botfather") {
-    setupBotFather(bot);
+    setupBotFather(botId, bot);
   } else {
-    setupBot(bot, waitUntil);
+    setupBot(botId, bot, waitUntil);
   }
 
   // Mark processed and run update in parallel
@@ -135,7 +154,15 @@ export async function handleUpdate(
       await bot.handleUpdate(update);
       await (await markUpdateProcessed(db, botId, update.update_id)).run();
     } catch (e) {
-      console.error(`[UPDATE_FAILURE] bot=${botId} err=${String(e)}`);
+      console.error(
+        JSON.stringify({
+          level: "error",
+          tag: "UPDATE_FAILURE",
+          botId,
+          error: String(e),
+          timestamp: new Date().toISOString(),
+        }),
+      );
     }
   };
 
@@ -145,6 +172,7 @@ export async function handleUpdate(
 }
 
 function setupBot(
+  botId: string,
   bot: Bot<FactoryContext>,
   _waitUntil: (p: Promise<unknown>) => void,
 ) {
@@ -178,7 +206,15 @@ function setupBot(
         if (i % 2 === 1) keyboard.row();
       }
     } catch (e) {
-      console.error("Menu parsing error:", e);
+      console.error(
+        JSON.stringify({
+          level: "error",
+          tag: "MENU_PARSING_ERROR",
+          botId: ctx.botId,
+          error: String(e),
+          timestamp: new Date().toISOString(),
+        }),
+      );
     }
 
     await ctx.reply(config.welcome_message, {
@@ -224,7 +260,15 @@ function setupBot(
           return await handleAction(ctx, match.action);
         }
       } catch (e) {
-        console.error("Menu match parse error:", e);
+        console.error(
+          JSON.stringify({
+            level: "error",
+            tag: "MENU_MATCH_ERROR",
+            botId: ctx.botId,
+            error: String(e),
+            timestamp: new Date().toISOString(),
+          }),
+        );
       }
     }
     await next();
@@ -263,7 +307,14 @@ function setupBot(
 
     await ctx.answerCallbackQuery().catch((err: unknown) => {
       console.error(
-        `[CALLBACK_QUERY_ERROR] bot=${ctx.botId} chat=${ctx.chat?.id} err=${String(err)}`,
+        JSON.stringify({
+          level: "error",
+          tag: "CALLBACK_QUERY_ERROR",
+          botId: ctx.botId,
+          chatId: ctx.chat?.id,
+          error: String(err),
+          timestamp: new Date().toISOString(),
+        }),
       );
     });
   });
@@ -294,7 +345,17 @@ function setupBot(
     );
   });
 
-  bot.catch((err) => console.error("Grammy error:", err));
+  bot.catch((err) => {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        tag: "GRAMMY_ERROR",
+        botId: botId,
+        error: String(err),
+        timestamp: new Date().toISOString(),
+      }),
+    );
+  });
 }
 
 export {

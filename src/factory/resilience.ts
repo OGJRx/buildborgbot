@@ -53,18 +53,23 @@ export async function reportFailure(db: D1Database, botId: string) {
     openedAt = now;
   }
 
-  await db
-    .prepare(
-      `INSERT INTO factory_circuit_breaker (bot_id, state, failure_count, last_failure_at, opened_at)
-       VALUES (?, ?, ?, unixepoch(), ${openedAt === now ? "unixepoch()" : "?"})
-       ON CONFLICT(bot_id) DO UPDATE SET state=excluded.state, failure_count=excluded.failure_count, last_failure_at=excluded.last_failure_at, opened_at=excluded.opened_at`,
-    )
-    .bind(
-      ...(openedAt === now
-        ? [botId, newState, newCount]
-        : [botId, newState, newCount, Math.floor(openedAt / 1000)]),
-    )
-    .run();
+  if (openedAt === now) {
+    // Freshly opened breaker
+    await db
+      .prepare(
+        "INSERT INTO factory_circuit_breaker (bot_id, state, failure_count, last_failure_at, opened_at) VALUES (?, ?, ?, unixepoch(), unixepoch()) ON CONFLICT(bot_id) DO UPDATE SET state=excluded.state, failure_count=excluded.failure_count, last_failure_at=excluded.last_failure_at, opened_at=excluded.opened_at",
+      )
+      .bind(botId, newState, newCount)
+      .run();
+  } else {
+    // Continue with existing opened_at
+    await db
+      .prepare(
+        "INSERT INTO factory_circuit_breaker (bot_id, state, failure_count, last_failure_at, opened_at) VALUES (?, ?, ?, unixepoch(), ?) ON CONFLICT(bot_id) DO UPDATE SET state=excluded.state, failure_count=excluded.failure_count, last_failure_at=excluded.last_failure_at, opened_at=excluded.opened_at",
+      )
+      .bind(botId, newState, newCount, Math.floor(openedAt / 1000))
+      .run();
+  }
 }
 
 export async function reportSuccess(db: D1Database, botId: string) {

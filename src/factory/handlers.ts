@@ -1,6 +1,7 @@
 import { InlineKeyboard } from "grammy";
 import { runAgent } from "./agent";
 import { buildCallback } from "./callback";
+import { assertEnv } from "./guards";
 import { canProceed, checkRateLimit } from "./resilience";
 import { summarizeConversation } from "./summarize";
 import { buildBudgetedHistory, estimateTokens } from "./token-budget";
@@ -88,6 +89,7 @@ export async function handleConfirmAndProcess(
   msgId: number,
 ) {
   if (!ctx.chat) return;
+  assertEnv(ctx);
   const db = ctx.env.DB;
   const botId = ctx.botId;
   const chatId = String(ctx.chat.id);
@@ -189,7 +191,15 @@ export async function handleConfirmAndProcess(
           .run();
       }
     } catch (err) {
-      console.error("Agent Error:", err);
+      console.error(
+        JSON.stringify({
+          level: "error",
+          tag: "AGENT_ERROR",
+          botId,
+          error: String(err),
+          timestamp: new Date().toISOString(),
+        }),
+      );
       await ctx.reply("❌ Error de procesamiento. Intenta de nuevo.");
     }
   };
@@ -200,6 +210,7 @@ export async function handleConfirmAndProcess(
 
 export async function handleSummarize(ctx: FactoryContext) {
   if (!ctx.chat) return;
+  assertEnv(ctx);
   const db = ctx.env.DB;
   const botId = ctx.botId;
   const chatId = String(ctx.chat.id);
@@ -216,7 +227,16 @@ export async function handleSummarize(ctx: FactoryContext) {
       { parse_mode: "HTML" },
     );
   } catch (err) {
-    console.error("Summarize Error:", err);
+    console.error(
+      JSON.stringify({
+        level: "error",
+        tag: "SUMMARIZE_ERROR",
+        botId,
+        chatId,
+        error: String(err),
+        timestamp: new Date().toISOString(),
+      }),
+    );
     await ctx.reply("⚠️ ERROR: No se pudo comprimir la memoria.");
   }
 }
@@ -226,6 +246,7 @@ export async function handleAction(ctx: FactoryContext, action: string) {
     return await ctx.conversation.enter("feedbackConversation");
   }
 
+  assertEnv(ctx);
   const db = ctx.env.DB;
   const sequences = await db
     .prepare(
