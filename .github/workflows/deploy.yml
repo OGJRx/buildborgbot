@@ -41,6 +41,16 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
+
+      - name: Validate Secrets
+        run: |
+          if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then echo "::error::TELEGRAM_BOT_TOKEN is empty"; exit 1; fi
+          if [ -z "${{ secrets.TITANIUM_API_SECRET }}" ]; then echo "::error::TITANIUM_API_SECRET is empty"; exit 1; fi
+          if [ -z "${{ secrets.GEMINI_API_KEY }}" ]; then echo "::error::GEMINI_API_KEY is empty"; exit 1; fi
+          if [ -z "${{ secrets.MIGRATION_KEY }}" ]; then echo "::error::MIGRATION_KEY is empty"; exit 1; fi
+          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then echo "::error::CLOUDFLARE_API_TOKEN is empty"; exit 1; fi
+          if [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then echo "::error::CLOUDFLARE_ACCOUNT_ID is empty"; exit 1; fi
+          if [ -z "${{ vars.WORKER_URL }}" ]; then echo "::error::WORKER_URL is empty"; exit 1; fi
       - name: Set Cloudflare Secrets
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -62,3 +72,15 @@ jobs:
         with:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy
+
+      - name: Sync BotFather Webhook
+        env:
+          WORKER_URL: ${{ vars.WORKER_URL || 'https://fabricaborgbots.marketceogjr.workers.dev' }}
+          TITANIUM_API_SECRET: ${{ secrets.TITANIUM_API_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: npx tsx scripts/setup-botfather.ts
+
+      # Future: Sync tenant bot webhooks
+      # - name: Sync Tenant Webhooks
+      #   run: ... (requires refactor of sync-webhooks.ts to use D1 instead of env vars)

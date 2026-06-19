@@ -9,13 +9,53 @@ async function setupBotFather() {
   }
 
   const webhookUrl = `${WORKER_URL}/webhook/botfather`;
-  const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${TITANIUM_API_SECRET}`;
-
-  console.log(`Setting webhook for BotFather: ${webhookUrl}`);
+  const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
   try {
-    const response = await fetch(telegramApiUrl);
-    const data = (await response.json()) as {
+    const infoResponse = await fetch(`${telegramApiUrl}/getWebhookInfo`);
+
+    if (!infoResponse.ok) {
+      throw new Error(
+        `Failed to get webhook info: ${infoResponse.status} ${infoResponse.statusText}`,
+      );
+    }
+
+    const infoData = (await infoResponse.json()) as {
+      ok: boolean;
+      result?: { url?: string; secret_token?: string };
+    };
+
+    if (!infoData.ok) {
+      throw new Error(`Failed to get webhook info: Unknown error`);
+    }
+
+    const currentUrl = infoData.result?.url;
+    const currentSecret = infoData.result?.secret_token;
+
+    if (currentUrl === webhookUrl && currentSecret === TITANIUM_API_SECRET) {
+      console.log(
+        `✅ BotFather webhook already configured at ${webhookUrl}. Skipping.`,
+      );
+      return;
+    }
+
+    if (currentUrl !== webhookUrl || currentSecret !== TITANIUM_API_SECRET) {
+      console.log(
+        `Found different BotFather webhook: ${currentUrl || "none"}. Reconfiguring to ${webhookUrl}`,
+      );
+    }
+
+    const setResponse = await fetch(
+      `${telegramApiUrl}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${TITANIUM_API_SECRET}`,
+    );
+
+    if (!setResponse.ok) {
+      throw new Error(
+        `Failed to set webhook: ${setResponse.status} ${setResponse.statusText}`,
+      );
+    }
+
+    const data = (await setResponse.json()) as {
       ok: boolean;
       description?: string;
     };
@@ -23,10 +63,9 @@ async function setupBotFather() {
     if (data.ok) {
       console.log("✅ BotFather webhook configured successfully.");
     } else {
-      console.error(
-        `❌ Failed to configure BotFather webhook: ${data.description}`,
+      throw new Error(
+        `Failed to configure BotFather webhook: ${data.description || "Unknown error"}`,
       );
-      process.exit(1);
     }
   } catch (error) {
     console.error("❌ Error configuring BotFather webhook:", error);
