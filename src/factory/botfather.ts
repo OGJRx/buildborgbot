@@ -8,7 +8,7 @@ import type { FactoryContext } from "./types";
  * BotFather Administrative Handlers
  */
 
-export function setupBotFather(bot: Bot<FactoryContext>) {
+export function setupBotFather(_botId: string, bot: Bot<FactoryContext>) {
   bot.use(createConversation(newBotConversation));
 
   bot.command("start", async (ctx) => {
