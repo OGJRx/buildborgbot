@@ -31,8 +31,14 @@ export interface FactorySequence {
   payload_json: string;
 }
 
+export interface TitaniumSession extends Record<string, unknown> {
+  _titaniumEnv?: CoreEnv;
+  _titaniumBotId?: string;
+  _titaniumHost?: string;
+}
+
 export type FactoryContext = Context &
-  SessionFlavor<Record<string, unknown>> & {
+  SessionFlavor<TitaniumSession> & {
     conversation: ConversationFlavor<Context>["conversation"];
     env: CoreEnv;
     botId: string;

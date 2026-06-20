@@ -135,7 +135,7 @@ export async function upsertBotConfig(
 
   if (plainToken && webhookSecret) {
     const webhookUrl = `https://${host}/webhook/${slug}`;
-    const telegramApiUrl = `https://api.telegram.org/bot${plainToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${webhookSecret}`;
+    const telegramApiUrl = `https://api.telegram.org/bot${plainToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${webhookSecret}&allowed_updates=["message","callback_query"]`;
 
     try {
       const tgRes = await fetch(telegramApiUrl);
@@ -143,13 +143,32 @@ export async function upsertBotConfig(
         ok: boolean;
         description?: string;
       };
-      if (!tgData.ok) {
+      if (tgData.ok) {
+        await db
+          .prepare(
+            "UPDATE factory_bots SET webhook_configured_at = CURRENT_TIMESTAMP, webhook_last_error = NULL WHERE bot_id = ?",
+          )
+          .bind(validated.bot_id)
+          .run();
+      } else {
         console.error(
           `Webhook setup failed for ${validated.bot_id}: ${tgData.description}`,
         );
+        await db
+          .prepare(
+            "UPDATE factory_bots SET webhook_last_error = ? WHERE bot_id = ?",
+          )
+          .bind(tgData.description || "Unknown error", validated.bot_id)
+          .run();
       }
     } catch (webhookErr) {
       console.error(`Webhook setup error for ${validated.bot_id}:`, webhookErr);
+      await db
+        .prepare(
+          "UPDATE factory_bots SET webhook_last_error = ? WHERE bot_id = ?",
+        )
+        .bind(String(webhookErr), validated.bot_id)
+        .run();
     }
   }
 

@@ -100,11 +100,11 @@ export async function handleUpdate(
   });
 
   // Session storage (created fresh per request — D1Adapter is lightweight)
-  const sessionRaw = await D1Adapter.create<Record<string, unknown>>(
+  const sessionRaw = await D1Adapter.create<TitaniumSession>(
     db,
     "factory_sessions",
   );
-  const sessionAdapter: StorageAdapter<Record<string, unknown>> = {
+  const sessionAdapter: StorageAdapter<TitaniumSession> = {
     read: (key) => sessionRaw.read(key),
     write: (key, value) => sessionRaw.write(key, value),
     delete: (key) => sessionRaw.delete(key),
@@ -120,6 +120,16 @@ export async function handleUpdate(
       },
     }),
   );
+
+  // Post-session middleware to sync request context to session for conversation fallback
+  bot.use(async (ctx, next) => {
+    if (ctx.session) {
+      ctx.session._titaniumEnv = currentEnv;
+      ctx.session._titaniumBotId = currentBotId;
+      ctx.session._titaniumHost = currentHost;
+    }
+    await next();
+  });
 
   // Conversation storage (created fresh per request)
   const convoRaw = await D1Adapter.create<VersionedState<ConversationData>>(
