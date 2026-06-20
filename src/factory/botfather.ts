@@ -2,6 +2,7 @@ import { createConversation } from "@grammyjs/conversations";
 import { type Bot, InlineKeyboard } from "grammy";
 import { buildCallback, parseCallback } from "./callback";
 import { newBotConversation } from "./conversations";
+import { assertEnv } from "./guards";
 import type { FactoryContext } from "./types";
 
 /**
@@ -12,6 +13,7 @@ export function setupBotFather(_botId: string, bot: Bot<FactoryContext>) {
   bot.use(createConversation(newBotConversation));
 
   bot.command("start", async (ctx) => {
+    assertEnv(ctx);
     const db = ctx.env.DB;
     const apiSecret = ctx.env.TITANIUM_API_SECRET;
 
@@ -49,6 +51,7 @@ export function setupBotFather(_botId: string, bot: Bot<FactoryContext>) {
   });
 
   bot.command("mybots", async (ctx) => {
+    assertEnv(ctx);
     const bots = await ctx.env.DB.prepare(
       "SELECT bot_name, slug FROM factory_bots",
     ).all<{ bot_name: string; slug: string }>();
@@ -68,6 +71,7 @@ export function setupBotFather(_botId: string, bot: Bot<FactoryContext>) {
   });
 
   bot.command("deletebot", async (ctx) => {
+    assertEnv(ctx);
     const slug = ctx.match;
     if (!slug) {
       return await ctx.reply("Usa: /deletebot {slug}");
@@ -106,6 +110,7 @@ export function setupBotFather(_botId: string, bot: Bot<FactoryContext>) {
 
   // Action dispatcher for BotFather signed callbacks
   bot.on("callback_query:data", async (ctx, next) => {
+    assertEnv(ctx);
     const db = ctx.env.DB;
     const apiSecret = ctx.env.TITANIUM_API_SECRET;
     const parsed = await parseCallback(

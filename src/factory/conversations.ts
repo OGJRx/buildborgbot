@@ -61,6 +61,7 @@ export async function newBotConversation(
   await promptCtx.reply("⏳ Procesando creación...");
 
   try {
+    assertEnv(promptCtx);
     const result = await conversation.external(() =>
       upsertBotConfig(
         promptCtx.env.DB,

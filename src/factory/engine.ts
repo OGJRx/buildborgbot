@@ -46,6 +46,19 @@ export async function handleUpdate(
   waitUntil: (promise: Promise<unknown>) => void,
   host = "unknown",
 ): Promise<Response> {
+  if (!env?.DB) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        tag: "BINDING_MISSING",
+        botId,
+        error: "D1 binding 'DB' is undefined. Check wrangler.toml and Cloudflare dashboard.",
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    return new Response("Service configuration error", { status: 503 });
+  }
+
   const db = env.DB;
 
   // Validate token format (Titanium Guard)
