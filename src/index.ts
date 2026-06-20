@@ -419,6 +419,43 @@ export default {
       }
     }
 
+    // --- Sync Webhook API ---
+    if (
+      url.pathname === "/api/factory/sync-webhook" &&
+      request.method === "POST"
+    ) {
+      if (
+        request.headers.get("x-titanium-api-secret") !== env.TITANIUM_API_SECRET
+      ) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+
+      const webhookUrl = `https://${request.headers.get("host") || url.host}/webhook/botfather`;
+      const telegramUrl = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${env.TITANIUM_API_SECRET}&allowed_updates=["message","callback_query"]`;
+
+      try {
+        const res = await fetch(telegramUrl);
+        const data = (await res.json()) as {
+          ok: boolean;
+          description?: string;
+        };
+
+        if (data.ok) {
+          return Response.json({ success: true, webhookUrl });
+        }
+        return Response.json(
+          { success: false, error: data.description },
+          { status: 500 },
+        );
+      } catch (err) {
+        return Response.json(
+          { success: false, error: String(err) },
+          { status: 500 },
+        );
+      }
+    }
+
+    // Return not found as fallback
     return new Response("Not Found", { status: 404 });
   },
 };

@@ -86,6 +86,7 @@ export async function handleUpdate(
     bot = new Bot<FactoryContext>(token, { botInfo });
     botCache.set(token, bot);
 
+    // Always re-inject env to handle bot reuse across requests
     bot.use(async (ctx, next) => {
       ctx.env = env;
       ctx.botId = botId;
@@ -166,6 +167,7 @@ export async function handleUpdate(
           level: "error",
           tag: "UPDATE_FAILURE",
           botId,
+          envMissing: !env?.DB,
           error: String(e),
           timestamp: new Date().toISOString(),
         }),

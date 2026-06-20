@@ -15,56 +15,56 @@ export async function newBotConversation(
       parse_mode: "HTML",
     },
   );
-  const botIdMsg = await conversation.waitFor("message:text", {
+  const botIdCtx = await conversation.waitFor("message:text", {
     maxMilliseconds: 5 * 60 * 1000,
   });
-  const botId = botIdMsg.message.text.trim();
+  const botId = botIdCtx.message.text.trim();
 
   // Validation: alpha-numeric, underscores, dashes, 1-64 chars.
   const botIdRegex = /^[a-zA-Z0-9_-]{1,64}$/;
   const reservedSlugs = ["botfather", "api", "health", "webhook"];
   if (!botIdRegex.test(botId) || reservedSlugs.includes(botId.toLowerCase())) {
-    await ctx.reply(
+    await botIdCtx.reply(
       "❌ <b>ID INVÁLIDO</b>\n\nEl ID solo puede contener letras, números, guiones y guiones bajos (máx 64 caracteres), y no puede ser una palabra reservada. Reinicia el proceso con /newbot.",
       { parse_mode: "HTML" },
     );
     return;
   }
 
-  await ctx.reply("📛 Ingresa el nombre público del bot:", {
+  await botIdCtx.reply("📛 Ingresa el nombre público del bot:", {
     parse_mode: "HTML",
   });
-  const botNameMsg = await conversation.waitFor("message:text", {
+  const botNameCtx = await conversation.waitFor("message:text", {
     maxMilliseconds: 5 * 60 * 1000,
   });
-  const botName = botNameMsg.message.text;
+  const botName = botNameCtx.message.text;
 
-  await ctx.reply(
+  await botNameCtx.reply(
     "🔑 Ingresa el <b>Telegram Bot Token</b> (ej: <code>12345:ABCDE...</code>):",
     {
       parse_mode: "HTML",
     },
   );
-  const tokenMsg = await conversation.waitFor("message:text", {
+  const tokenCtx = await conversation.waitFor("message:text", {
     maxMilliseconds: 5 * 60 * 1000,
   });
-  const botToken = tokenMsg.message.text;
+  const botToken = tokenCtx.message.text;
 
-  await ctx.reply("📜 Ingresa el System Prompt (instrucciones de IA):", {
+  await tokenCtx.reply("📜 Ingresa el System Prompt (instrucciones de IA):", {
     parse_mode: "HTML",
   });
-  const promptMsg = await conversation.waitFor("message:text", {
+  const promptCtx = await conversation.waitFor("message:text", {
     maxMilliseconds: 5 * 60 * 1000,
   });
-  const systemPrompt = promptMsg.message.text;
+  const systemPrompt = promptCtx.message.text;
 
-  await promptMsg.reply("⏳ Procesando creación...");
+  await promptCtx.reply("⏳ Procesando creación...");
 
   try {
     const result = await conversation.external(() =>
       upsertBotConfig(
-        promptMsg.env.DB,
-        promptMsg.env,
+        promptCtx.env.DB,
+        promptCtx.env,
         {
           bot_id: botId,
           bot_name: botName,
@@ -76,19 +76,19 @@ export async function newBotConversation(
           welcome_message: `¡Hola! Soy ${botName}. ¿En qué puedo ayudarte?`,
           menu_json: "[]",
         },
-        promptMsg.host,
+        promptCtx.host,
       ),
     );
 
     if (result.success) {
-      await promptMsg.reply(
+      await promptCtx.reply(
         `✅ <b>BOT CREADO</b>\n\nID: <code>${botId}</code>\nURL Webhook: <code>/webhook/${botId}</code>`,
         {
           parse_mode: "HTML",
         },
       );
     } else {
-      await promptMsg.reply(
+      await promptCtx.reply(
         `❌ Error al crear bot: ${result.error ?? "Unknown error"}`,
       );
     }
@@ -102,7 +102,7 @@ export async function newBotConversation(
         timestamp: new Date().toISOString(),
       }),
     );
-    await promptMsg.reply(`❌ Error crítico: ${String(err)}`);
+    await promptCtx.reply(`❌ Error crítico: ${String(err)}`);
   }
 }
 
@@ -117,32 +117,32 @@ export async function feedbackConversation(
     },
   );
 
-  const feedbackMsg = await conversation.waitFor("message:text", {
+  const feedbackCtx = await conversation.waitFor("message:text", {
     maxMilliseconds: 5 * 60 * 1000, // 5 minutos TTL
   });
 
-  if (!feedbackMsg.message?.text) {
-    await ctx.reply("⚠️ Tiempo agotado. La sesión de feedback ha sido cerrada.");
+  if (!feedbackCtx.message?.text) {
+    await feedbackCtx.reply("⚠️ Tiempo agotado. La sesión de feedback ha sido cerrada.");
     return;
   }
 
-  const feedback = feedbackMsg.message.text;
+  const feedback = feedbackCtx.message.text;
 
   await conversation.external(async () => {
-    assertEnv(feedbackMsg);
-    await feedbackMsg.env.DB.prepare(
+    assertEnv(feedbackCtx);
+    await feedbackCtx.env.DB.prepare(
       "INSERT INTO factory_feedback (bot_id, chat_id, user_id, content) VALUES (?, ?, ?, ?)",
     )
       .bind(
-        feedbackMsg.botId,
-        String(feedbackMsg.chat?.id ?? 0),
-        feedbackMsg.from?.id ?? 0,
+        feedbackCtx.botId,
+        String(feedbackCtx.chat?.id ?? 0),
+        feedbackCtx.from?.id ?? 0,
         feedback,
       )
       .run();
   });
 
-  await feedbackMsg.reply(
+  await feedbackCtx.reply(
     "✅ <b>REGISTRO EXITOSO</b>\n\nTu feedback ha sido almacenado en la memoria central. Gracias por contribuir a la evolución del enjambre.",
     {
       parse_mode: "HTML",
