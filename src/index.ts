@@ -52,12 +52,29 @@ export default {
       const incomingSecret = request.headers.get(
         "X-Telegram-Bot-Api-Secret-Token",
       );
-      if (!incomingSecret)
+      if (!incomingSecret) {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            tag: "WEBHOOK_AUTH_MISSING",
+            slug,
+            timestamp: new Date().toISOString(),
+          }),
+        );
         return new Response("Forbidden: Secret missing", { status: 403 });
+      }
 
       // Special case: BotFather admin bot (not in factory_bots table)
       if (slug === "botfather") {
         if (!(await timingSafeEqual(incomingSecret, env.TITANIUM_API_SECRET))) {
+          console.error(
+            JSON.stringify({
+              level: "error",
+              tag: "WEBHOOK_AUTH_INVALID",
+              slug: "botfather",
+              timestamp: new Date().toISOString(),
+            }),
+          );
           return new Response("Forbidden: Invalid secret", { status: 403 });
         }
 
@@ -96,6 +113,15 @@ export default {
 
       // Validate webhook secret (Timing-safe comparison)
       if (!(await timingSafeEqual(incomingSecret, botConfig.webhook_secret))) {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            tag: "WEBHOOK_AUTH_INVALID",
+            botId: botConfig.bot_id,
+            slug,
+            timestamp: new Date().toISOString(),
+          }),
+        );
         return new Response("Forbidden: Invalid secret", { status: 403 });
       }
 
