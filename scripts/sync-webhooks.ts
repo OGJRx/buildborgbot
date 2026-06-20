@@ -121,6 +121,16 @@ async function syncBot(
   }
 }
 
+/**
+ * TODO: REFACTOR REQUIRED FOR TITANIUM COMPLIANCE
+ * 1. Remove reliance on process.env[token_var_name].
+ *    The script should fetch decrypted tokens from a secure internal Worker endpoint
+ *    or use a local decryption utility if running with MIGRATION_KEY.
+ * 2. Integrate with D1 directly (via wrangler d1 execute) or via the Management API
+ *    to get the list of all active bots and their configurations.
+ * 3. Ensure idempotency by checking getWebhookInfo before calling setWebhook.
+ */
+
 async function sync() {
   const env = process.env as unknown as {
     WORKER_URL: string;
