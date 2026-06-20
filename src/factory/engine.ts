@@ -29,6 +29,13 @@ import type { CoreEnv, FactoryContext, Menu } from "./types";
 
 const botCache = new Map<string, Bot<FactoryContext>>();
 
+type ExtendedUpdate = Update & {
+  env: CoreEnv;
+  botId: string;
+  host: string;
+  waitUntil: (promise: Promise<unknown>) => void;
+};
+
 const sessionAdapterCache = new Map<
   D1Database,
   StorageAdapter<Record<string, unknown>>
@@ -52,7 +59,8 @@ export async function handleUpdate(
         level: "error",
         tag: "BINDING_MISSING",
         botId,
-        error: "D1 binding 'DB' is undefined. Check wrangler.toml and Cloudflare dashboard.",
+        error:
+          "D1 binding 'DB' is undefined. Check wrangler.toml and Cloudflare dashboard.",
         timestamp: new Date().toISOString(),
       }),
     );
@@ -99,12 +107,26 @@ export async function handleUpdate(
     bot = new Bot<FactoryContext>(token, { botInfo });
     botCache.set(token, bot);
 
-    // Always re-inject env to handle bot reuse across requests
+    // Always re-inject latest request context to handle bot reuse across requests
     bot.use(async (ctx, next) => {
-      ctx.env = env;
-      ctx.botId = botId;
-      ctx.host = host;
-      ctx.waitUntil = waitUntil;
+      const req = ctx.update as ExtendedUpdate;
+
+      if (!req.env?.DB) {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            tag: "BINDING_MISSING_MIDDLEWARE",
+            botId: req.botId ?? botId,
+            error: "D1 binding 'DB' was lost or not propagated to middleware.",
+            timestamp: new Date().toISOString(),
+          }),
+        );
+      }
+
+      ctx.env = req.env;
+      ctx.botId = req.botId;
+      ctx.host = req.host;
+      ctx.waitUntil = req.waitUntil;
       await next();
     });
 
@@ -169,10 +191,17 @@ export async function handleUpdate(
     }
   }
 
+  // Attach latest context to update to avoid stale closures in cached bot
+  const extendedUpdate = update as ExtendedUpdate;
+  extendedUpdate.env = env;
+  extendedUpdate.botId = botId;
+  extendedUpdate.host = host;
+  extendedUpdate.waitUntil = waitUntil;
+
   // Mark processed and run update in parallel
   const runUpdate = async () => {
     try {
-      await bot.handleUpdate(update);
+      await bot.handleUpdate(extendedUpdate);
       await (await markUpdateProcessed(db, botId, update.update_id)).run();
     } catch (e) {
       console.error(
