@@ -151,7 +151,16 @@ export async function handleUpdate(
     setupBot(botId, bot);
   }
 
-  // No mutation of update object — all context flows via closure
+  // Attach env/botId/host/waitUntil to update for conversations plugin
+  // Grammy's conversations creates new Context for waitFor() without running middleware
+  // Mutating the update ensures the new ctx.update.env/botId are available
+  Object.assign(update, {
+    env: currentEnv,
+    botId: currentBotId,
+    host: currentHost,
+    waitUntil: currentWaitUntil,
+  });
+
   const runUpdate = async () => {
     try {
       await bot.handleUpdate(update);
