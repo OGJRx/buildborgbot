@@ -76,7 +76,7 @@ jobs:
 
       - name: Sync BotFather Webhook
         env:
-          WORKER_URL: ${{ vars.WORKER_URL || 'https://fabricaborgbots.marketceogjr.workers.dev' }}
+          WORKER_URL: ${{ vars.WORKER_URL }}
           TITANIUM_API_SECRET: ${{ secrets.TITANIUM_API_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: npx tsx scripts/setup-botfather.ts
