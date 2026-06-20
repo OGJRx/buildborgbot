@@ -38,10 +38,10 @@ describe("Engine Handlers Business Logic", () => {
       batch: <T = unknown>(
         statements: D1PreparedStatement[],
       ) => Promise<D1Result<T>[]>;
-      run: (sql: string, ...params: any[]) => Promise<D1Result<unknown>>;
-      first: (sql: string, ...params: any[]) => Promise<unknown>;
-      all: (sql: string, ...params: any[]) => Promise<D1Result<unknown>>;
-      bind: (...params: any[]) => any;
+      run: (sql: string, ...params: unknown[]) => Promise<D1Result<unknown>>;
+      first: (sql: string, ...params: unknown[]) => Promise<unknown>;
+      all: (sql: string, ...params: unknown[]) => Promise<D1Result<unknown>>;
+      bind: (...params: unknown[]) => unknown;
     };
   }
 
@@ -86,9 +86,10 @@ describe("Engine Handlers Business Logic", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    (mockDbRaw.run as any).mockResolvedValue({
+    vi.mocked(mockDbRaw.run).mockResolvedValue({
       success: true,
       meta: { last_row_id: 1 },
+      results: [],
     });
   });
 
@@ -108,7 +109,11 @@ describe("Engine Handlers Business Logic", () => {
           payload_json: "{}",
         },
       ];
-      (mockDbRaw.all as any).mockResolvedValueOnce({ results: sequences });
+      vi.mocked(mockDbRaw.all).mockResolvedValueOnce({
+        results: sequences,
+        success: true,
+        meta: { last_row_id: 0 },
+      });
 
       await handleAction(mockCtx, "ACT");
 
@@ -124,7 +129,11 @@ describe("Engine Handlers Business Logic", () => {
     });
 
     it("should reply with undefined state if no sequences found", async () => {
-      (mockDbRaw.all as any).mockResolvedValueOnce({ results: [] });
+      vi.mocked(mockDbRaw.all).mockResolvedValueOnce({
+        results: [],
+        success: true,
+        meta: { last_row_id: 0 },
+      });
 
       await handleAction(mockCtx, "UNKNOWN");
 
@@ -146,24 +155,29 @@ describe("Engine Handlers Business Logic", () => {
   describe("handleConfirmAndProcess", () => {
     it("should process user message and reply with AI response", async () => {
       // 1. Rate Limit Check
-      (mockDbRaw.first as any).mockResolvedValueOnce({ request_count: 1 });
+      vi.mocked(mockDbRaw.first).mockResolvedValueOnce({ request_count: 1 });
       // 2. Circuit Breaker Check
-      (mockDbRaw.first as any).mockResolvedValueOnce({ state: "CLOSED" });
+      vi.mocked(mockDbRaw.first).mockResolvedValueOnce({ state: "CLOSED" });
 
       // Mock message record retrieval
-      (mockDbRaw.first as any).mockResolvedValueOnce({ content: "User Input" });
+      vi.mocked(mockDbRaw.first).mockResolvedValueOnce({
+        content: "User Input",
+      });
       // Mock system prompt retrieval
-      (mockDbRaw.first as any).mockResolvedValueOnce({
+      vi.mocked(mockDbRaw.first).mockResolvedValueOnce({
         system_prompt: "Be helpful",
       });
       // Mock history retrieval
-      (mockDbRaw.all as any).mockResolvedValueOnce({
+      vi.mocked(mockDbRaw.all).mockResolvedValueOnce({
         results: [{ role: "user", content: "Prev msg" }],
+        success: true,
+        meta: { last_row_id: 0 },
       });
       // Mock D1 run for saving model response
-      (mockDbRaw.run as any).mockResolvedValue({
+      vi.mocked(mockDbRaw.run).mockResolvedValue({
         success: true,
         meta: { last_row_id: 1 },
+        results: [],
       });
 
       await handleConfirmAndProcess(mockCtx, 123);
@@ -182,10 +196,10 @@ describe("Engine Handlers Business Logic", () => {
 
     it("should handle missing message record", async () => {
       // Mock resilience checks
-      (mockDbRaw.first as any).mockResolvedValueOnce({ request_count: 1 }); // RL
-      (mockDbRaw.first as any).mockResolvedValueOnce({ state: "CLOSED" }); // CB
+      vi.mocked(mockDbRaw.first).mockResolvedValueOnce({ request_count: 1 }); // RL
+      vi.mocked(mockDbRaw.first).mockResolvedValueOnce({ state: "CLOSED" }); // CB
 
-      (mockDbRaw.first as any).mockResolvedValueOnce(null);
+      vi.mocked(mockDbRaw.first).mockResolvedValueOnce(null);
 
       await handleConfirmAndProcess(mockCtx, 999);
 
@@ -196,11 +210,13 @@ describe("Engine Handlers Business Logic", () => {
 
     it("should not call AI if budget is exceeded", async () => {
       // Mock resilience checks
-      (mockDbRaw.first as any).mockResolvedValueOnce({ request_count: 1 }); // RL
-      (mockDbRaw.first as any).mockResolvedValueOnce({ state: "CLOSED" }); // CB
+      vi.mocked(mockDbRaw.first).mockResolvedValueOnce({ request_count: 1 }); // RL
+      vi.mocked(mockDbRaw.first).mockResolvedValueOnce({ state: "CLOSED" }); // CB
 
-      (mockDbRaw.first as any).mockResolvedValueOnce({ content: "User Input" });
-      (mockDbRaw.first as any).mockResolvedValueOnce({
+      vi.mocked(mockDbRaw.first).mockResolvedValueOnce({
+        content: "User Input",
+      });
+      vi.mocked(mockDbRaw.first).mockResolvedValueOnce({
         system_prompt: "Be helpful",
       });
 
@@ -210,12 +226,17 @@ describe("Engine Handlers Business Logic", () => {
         role: "user",
         content: "A".repeat(1000),
       }));
-      (mockDbRaw.all as any).mockResolvedValueOnce({ results: heavyHistory });
+      vi.mocked(mockDbRaw.all).mockResolvedValueOnce({
+        results: heavyHistory,
+        success: true,
+        meta: { last_row_id: 0 },
+      });
 
       // Mock D1 run for buildCallback (fact_summarize)
-      (mockDbRaw.run as any).mockResolvedValue({
+      vi.mocked(mockDbRaw.run).mockResolvedValue({
         success: true,
         meta: { last_row_id: 1 },
+        results: [],
       });
 
       await handleConfirmAndProcess(mockCtx, 123);
@@ -230,16 +251,18 @@ describe("Engine Handlers Business Logic", () => {
 
   describe("handleSummarize", () => {
     it("should perform atomic batch operations for summarization", async () => {
-      (mockDbRaw.all as any).mockResolvedValueOnce({
+      vi.mocked(mockDbRaw.all).mockResolvedValueOnce({
         results: [
           { role: "user", content: "Hello" },
           { role: "model", content: "Hi" },
         ],
+        success: true,
+        meta: { last_row_id: 0 },
       });
       mockGenerateContent.mockResolvedValueOnce({
         text: "SUMMARY_TEXT",
       });
-      (mockDbRaw.batch as any).mockResolvedValueOnce([]);
+      vi.mocked(mockDbRaw.batch).mockResolvedValueOnce([]);
 
       await handleSummarize(mockCtx);
 

@@ -122,7 +122,9 @@ export async function feedbackConversation(
   });
 
   if (!feedbackCtx.message?.text) {
-    await feedbackCtx.reply("⚠️ Tiempo agotado. La sesión de feedback ha sido cerrada.");
+    await feedbackCtx.reply(
+      "⚠️ Tiempo agotado. La sesión de feedback ha sido cerrada.",
+    );
     return;
   }
 
