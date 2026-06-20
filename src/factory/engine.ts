@@ -27,24 +27,6 @@ import type { CoreEnv, FactoryContext, Menu } from "./types";
 
 // --- FACTORY ENGINE ---
 
-const botCache = new Map<string, Bot<FactoryContext>>();
-
-type ExtendedUpdate = Update & {
-  env: CoreEnv;
-  botId: string;
-  host: string;
-  waitUntil: (promise: Promise<unknown>) => void;
-};
-
-const sessionAdapterCache = new Map<
-  D1Database,
-  StorageAdapter<Record<string, unknown>>
->();
-const convoAdapterCache = new Map<
-  D1Database,
-  StorageAdapter<VersionedState<ConversationData>>
->();
-
 export async function handleUpdate(
   botId: string,
   token: string,
@@ -69,7 +51,6 @@ export async function handleUpdate(
 
   const db = env.DB;
 
-  // Validate token format (Titanium Guard)
   if (!token?.includes(":") || token.length < 10) {
     console.error(`[FATAL] Invalid token for bot ${botId}`);
     return new Response("Unauthorized: Invalid Token Format", { status: 401 });
@@ -102,114 +83,88 @@ export async function handleUpdate(
     supports_join_request_queries: false,
   };
 
-  let bot = botCache.get(token);
-  if (!bot) {
-    bot = new Bot<FactoryContext>(token, { botInfo });
-    botCache.set(token, bot);
+  const bot = new Bot<FactoryContext>(token, { botInfo });
 
-    // Always re-inject latest request context to handle bot reuse across requests
-    bot.use(async (ctx, next) => {
-      const req = ctx.update as ExtendedUpdate;
+  const currentEnv = env;
+  const currentBotId = botId;
+  const currentHost = host;
+  const currentWaitUntil = waitUntil;
+  const currentDb = db;
 
-      if (!req.env?.DB) {
-        console.error(
-          JSON.stringify({
-            level: "error",
-            tag: "BINDING_MISSING_MIDDLEWARE",
-            botId: req.botId ?? botId,
-            error: "D1 binding 'DB' was lost or not propagated to middleware.",
-            timestamp: new Date().toISOString(),
-          }),
-        );
-      }
+  bot.use(async (ctx, next) => {
+    ctx.env = currentEnv;
+    ctx.botId = currentBotId;
+    ctx.host = currentHost;
+    ctx.waitUntil = currentWaitUntil;
+    await next();
+  });
 
-      ctx.env = req.env;
-      ctx.botId = req.botId;
-      ctx.host = req.host;
-      ctx.waitUntil = req.waitUntil;
-      await next();
-    });
+  // Session storage (created fresh per request — D1Adapter is lightweight)
+  const sessionRaw = await D1Adapter.create<Record<string, unknown>>(
+    db,
+    "factory_sessions",
+  );
+  const sessionAdapter: StorageAdapter<Record<string, unknown>> = {
+    read: (key) => sessionRaw.read(key),
+    write: (key, value) => sessionRaw.write(key, value),
+    delete: (key) => sessionRaw.delete(key),
+  };
 
-    // Session storage
-    let sessionAdapter = sessionAdapterCache.get(db);
-    if (!sessionAdapter) {
-      const sessionRaw = await D1Adapter.create<Record<string, unknown>>(
-        db,
-        "factory_sessions",
-      );
-      sessionAdapter = {
-        read: (key) => sessionRaw.read(key),
-        write: (key, value) => sessionRaw.write(key, value),
-        delete: (key) => sessionRaw.delete(key),
-      };
-      sessionAdapterCache.set(db, sessionAdapter);
-    }
+  bot.use(
+    session({
+      initial: () => ({}),
+      storage: sessionAdapter,
+      getSessionKey: (ctx) => {
+        const chatId = ctx.chat?.id.toString() ?? "unknown";
+        return `session:${chatId}:${ctx.botId}`;
+      },
+    }),
+  );
 
-    bot.use(
-      session({
-        initial: () => ({}),
-        storage: sessionAdapter,
-        getSessionKey: (ctx) => {
+  // Conversation storage (created fresh per request)
+  const convoRaw = await D1Adapter.create<VersionedState<ConversationData>>(
+    db,
+    "factory_sessions",
+  );
+  const convoAdapter: StorageAdapter<VersionedState<ConversationData>> = {
+    read: (key) => convoRaw.read(key),
+    write: (key, value) => convoRaw.write(key, value),
+    delete: (key) => convoRaw.delete(key),
+  };
+
+  bot.use(
+    conversations({
+      storage: {
+        type: "key",
+        adapter: convoAdapter,
+        getStorageKey: (ctx: Context & { botId: string }) => {
           const chatId = ctx.chat?.id.toString() ?? "unknown";
-          return `session:${chatId}:${ctx.botId}`;
+          return `convo:${chatId}:${ctx.botId}`;
         },
-      }),
-    );
+      },
+    }),
+  );
 
-    // Conversation storage
-    let convoAdapter = convoAdapterCache.get(db);
-    if (!convoAdapter) {
-      const convoRaw = await D1Adapter.create<VersionedState<ConversationData>>(
-        db,
-        "factory_sessions",
-      );
-      convoAdapter = {
-        read: (key) => convoRaw.read(key),
-        write: (key, value) => convoRaw.write(key, value),
-        delete: (key) => convoRaw.delete(key),
-      };
-      convoAdapterCache.set(db, convoAdapter);
-    }
-
-    bot.use(
-      conversations({
-        storage: {
-          type: "key",
-          adapter: convoAdapter,
-          getStorageKey: (ctx: Context & { botId: string }) => {
-            const chatId = ctx.chat?.id.toString() ?? "unknown";
-            return `convo:${chatId}:${ctx.botId}`;
-          },
-        },
-      }),
-    );
-
-    if (botId === "botfather") {
-      setupBotFather(botId, bot);
-    } else {
-      setupBot(botId, bot);
-    }
+  if (botId === "botfather") {
+    setupBotFather(botId, bot);
+  } else {
+    setupBot(botId, bot);
   }
 
-  // Attach latest context to update to avoid stale closures in cached bot
-  const extendedUpdate = update as ExtendedUpdate;
-  extendedUpdate.env = env;
-  extendedUpdate.botId = botId;
-  extendedUpdate.host = host;
-  extendedUpdate.waitUntil = waitUntil;
-
-  // Mark processed and run update in parallel
+  // No mutation of update object — all context flows via closure
   const runUpdate = async () => {
     try {
-      await bot.handleUpdate(extendedUpdate);
-      await (await markUpdateProcessed(db, botId, update.update_id)).run();
+      await bot.handleUpdate(update);
+      await (
+        await markUpdateProcessed(currentDb, botId, update.update_id)
+      ).run();
     } catch (e) {
       console.error(
         JSON.stringify({
           level: "error",
           tag: "UPDATE_FAILURE",
           botId,
-          envMissing: !env?.DB,
+          envMissing: !currentEnv?.DB,
           error: String(e),
           timestamp: new Date().toISOString(),
         }),
@@ -226,8 +181,8 @@ function setupBot(botId: string, bot: Bot<FactoryContext>) {
   bot.use(createConversation(feedbackConversation));
 
   bot.command("start", async (ctx) => {
-    const db = ctx.env.DB;
-    const config = await db
+    const currentDb = ctx.env.DB;
+    const config = await currentDb
       .prepare(
         "SELECT welcome_message, menu_json FROM factory_bots WHERE bot_id = ?",
       )
@@ -244,7 +199,7 @@ function setupBot(botId: string, bot: Bot<FactoryContext>) {
       for (let i = 0; i < menu.length; i++) {
         const btn = menu[i];
         if (!btn) continue;
-        const cb = await buildCallback(db, ctx.env.TITANIUM_API_SECRET, {
+        const cb = await buildCallback(currentDb, ctx.env.TITANIUM_API_SECRET, {
           bot_id: ctx.botId,
           action: btn.action,
           payload: "",
@@ -326,10 +281,8 @@ function setupBot(botId: string, bot: Bot<FactoryContext>) {
     const db = ctx.env.DB;
     const apiSecret = ctx.env.TITANIUM_API_SECRET;
 
-    // Pointer Pattern parsing
     const parsed = await parseCallback(db, apiSecret, ctx.botId, data);
     if (!parsed) {
-      // Legacy support or fallback
       if (data === "fact_summarize") {
         await handleSummarize(ctx);
       }
@@ -348,7 +301,6 @@ function setupBot(botId: string, bot: Bot<FactoryContext>) {
     } else if (action === "fact_summarize") {
       await handleSummarize(ctx);
     } else {
-      // Direct action from menu
       await handleAction(ctx, action);
     }
 
@@ -413,10 +365,3 @@ function setupBot(botId: string, bot: Bot<FactoryContext>) {
     }
   });
 }
-
-export {
-  CoreEnv,
-  FactoryBotConfig,
-  FactoryContext,
-  Menu,
-} from "./types";
