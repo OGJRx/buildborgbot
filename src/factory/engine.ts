@@ -23,7 +23,7 @@ import {
 } from "./handlers";
 import { markUpdateProcessed } from "./platform";
 import { MenuSchema } from "./schemas";
-import type { CoreEnv, FactoryContext, Menu } from "./types";
+import type { CoreEnv, FactoryContext, Menu, TitaniumSession } from "./types";
 
 // --- FACTORY ENGINE ---
 
