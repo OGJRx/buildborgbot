@@ -84,11 +84,21 @@ describe("Engine Handlers Business Logic", () => {
   const mockEnv = createMockEnv(mockDb);
   const mockCtx = createMockContext(mockEnv);
 
+  const defaultMeta = {
+    last_row_id: 0,
+    duration: 0,
+    size_after: 0,
+    rows_read: 0,
+    rows_written: 0,
+    changed_db: false,
+    changes: 0,
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(mockDbRaw.run).mockResolvedValue({
       success: true,
-      meta: { last_row_id: 1 },
+      meta: { ...defaultMeta, last_row_id: 1 },
       results: [],
     });
   });
@@ -112,7 +122,7 @@ describe("Engine Handlers Business Logic", () => {
       vi.mocked(mockDbRaw.all).mockResolvedValueOnce({
         results: sequences,
         success: true,
-        meta: { last_row_id: 0 },
+        meta: defaultMeta,
       });
 
       await handleAction(mockCtx, "ACT");
@@ -132,7 +142,7 @@ describe("Engine Handlers Business Logic", () => {
       vi.mocked(mockDbRaw.all).mockResolvedValueOnce({
         results: [],
         success: true,
-        meta: { last_row_id: 0 },
+        meta: defaultMeta,
       });
 
       await handleAction(mockCtx, "UNKNOWN");
@@ -171,12 +181,12 @@ describe("Engine Handlers Business Logic", () => {
       vi.mocked(mockDbRaw.all).mockResolvedValueOnce({
         results: [{ role: "user", content: "Prev msg" }],
         success: true,
-        meta: { last_row_id: 0 },
+        meta: defaultMeta,
       });
       // Mock D1 run for saving model response
       vi.mocked(mockDbRaw.run).mockResolvedValue({
         success: true,
-        meta: { last_row_id: 1 },
+        meta: { ...defaultMeta, last_row_id: 1 },
         results: [],
       });
 
@@ -229,13 +239,13 @@ describe("Engine Handlers Business Logic", () => {
       vi.mocked(mockDbRaw.all).mockResolvedValueOnce({
         results: heavyHistory,
         success: true,
-        meta: { last_row_id: 0 },
+        meta: defaultMeta,
       });
 
       // Mock D1 run for buildCallback (fact_summarize)
       vi.mocked(mockDbRaw.run).mockResolvedValue({
         success: true,
-        meta: { last_row_id: 1 },
+        meta: { ...defaultMeta, last_row_id: 1 },
         results: [],
       });
 
@@ -257,7 +267,7 @@ describe("Engine Handlers Business Logic", () => {
           { role: "model", content: "Hi" },
         ],
         success: true,
-        meta: { last_row_id: 0 },
+        meta: defaultMeta,
       });
       mockGenerateContent.mockResolvedValueOnce({
         text: "SUMMARY_TEXT",
