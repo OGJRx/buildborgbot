@@ -82,9 +82,9 @@ export async function upsertBotConfig(
   host: string,
 ): Promise<{
   success: boolean;
-  webhook_ok?: boolean;
-  webhook_error?: string;
-  error?: string;
+  webhook_ok?: boolean | undefined;
+  webhook_error?: string | undefined;
+  error?: string | undefined;
 }> {
   const existing = await db
     .prepare(
