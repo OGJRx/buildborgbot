@@ -5,7 +5,8 @@ export function assertEnv(
 ): asserts ctx is FactoryContext & { env: NonNullable<FactoryContext["env"]> } {
   // Propagate env/botId/host/waitUntil from session or update when middleware skipped (conversation waitFor)
   if (ctx.session) {
-    if (!ctx.env && ctx.session._titaniumEnv) ctx.env = ctx.session._titaniumEnv;
+    if (!ctx.env && ctx.session._titaniumEnv)
+      ctx.env = ctx.session._titaniumEnv;
     if (!ctx.botId && ctx.session._titaniumBotId)
       ctx.botId = ctx.session._titaniumBotId;
     if (!ctx.host && ctx.session._titaniumHost)
