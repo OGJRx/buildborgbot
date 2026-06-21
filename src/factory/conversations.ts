@@ -82,12 +82,21 @@ export async function newBotConversation(
     );
 
     if (result.success) {
-      await promptCtx.reply(
-        `✅ <b>BOT CREADO</b>\n\nID: <code>${botId}</code>\nURL Webhook: <code>/webhook/${botId}</code>`,
-        {
-          parse_mode: "HTML",
-        },
-      );
+      if (result.webhook_ok) {
+        await promptCtx.reply(
+          `✅ <b>BOT CREADO</b>\n\nID: <code>${botId}</code>\nURL Webhook: <code>/webhook/${botId}</code>`,
+          {
+            parse_mode: "HTML",
+          },
+        );
+      } else {
+        await promptCtx.reply(
+          `⚠️ <b>BOT CREADO CON ADVERTENCIA</b>\n\nID: <code>${botId}</code>\n\nEl bot se registró correctamente pero el <b>webhook NO pudo configurarse</b>.\n\nError: <code>${result.webhook_error}</code>\n\nEl bot no recibirá mensajes hasta que se resuelva este problema. Puedes intentar actualizarlo nuevamente más tarde.`,
+          {
+            parse_mode: "HTML",
+          },
+        );
+      }
     } else {
       await promptCtx.reply(
         `❌ Error al crear bot: ${result.error ?? "Unknown error"}`,

@@ -80,7 +80,12 @@ export async function upsertBotConfig(
     token?: string | undefined;
   },
   host: string,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{
+  success: boolean;
+  webhook_ok?: boolean;
+  webhook_error?: string;
+  error?: string;
+}> {
   const existing = await db
     .prepare(
       "SELECT slug, webhook_secret, token, token_iv FROM factory_bots WHERE bot_id = ?",
@@ -133,6 +138,9 @@ export async function upsertBotConfig(
     plainToken = validated.token;
   }
 
+  let webhook_ok = true;
+  let webhook_error: string | undefined;
+
   if (plainToken && webhookSecret) {
     const webhookUrl = `https://${host}/webhook/${slug}`;
     const telegramApiUrl = `https://api.telegram.org/bot${plainToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${webhookSecret}&allowed_updates=["message","callback_query"]`;
@@ -144,33 +152,59 @@ export async function upsertBotConfig(
         description?: string;
       };
       if (tgData.ok) {
-        await db
-          .prepare(
-            "UPDATE factory_bots SET webhook_configured_at = CURRENT_TIMESTAMP, webhook_last_error = NULL WHERE bot_id = ?",
-          )
-          .bind(validated.bot_id)
-          .run();
+        webhook_ok = true;
+        try {
+          await db
+            .prepare(
+              "UPDATE factory_bots SET webhook_configured_at = CURRENT_TIMESTAMP, webhook_last_error = NULL WHERE bot_id = ?",
+            )
+            .bind(validated.bot_id)
+            .run();
+        } catch (dbErr) {
+          console.error(
+            `Failed to update webhook success status for ${validated.bot_id}:`,
+            dbErr,
+          );
+        }
       } else {
+        webhook_ok = false;
+        webhook_error = tgData.description || "Unknown Telegram error";
         console.error(
           `Webhook setup failed for ${validated.bot_id}: ${tgData.description}`,
         );
+        try {
+          await db
+            .prepare(
+              "UPDATE factory_bots SET webhook_last_error = ? WHERE bot_id = ?",
+            )
+            .bind(webhook_error, validated.bot_id)
+            .run();
+        } catch (dbErr) {
+          console.error(
+            `Failed to update webhook error status for ${validated.bot_id}:`,
+            dbErr,
+          );
+        }
+      }
+    } catch (webhookErr) {
+      webhook_ok = false;
+      webhook_error = String(webhookErr);
+      console.error(`Webhook setup error for ${validated.bot_id}:`, webhookErr);
+      try {
         await db
           .prepare(
             "UPDATE factory_bots SET webhook_last_error = ? WHERE bot_id = ?",
           )
-          .bind(tgData.description || "Unknown error", validated.bot_id)
+          .bind(webhook_error, validated.bot_id)
           .run();
+      } catch (dbErr) {
+        console.error(
+          `Failed to update webhook exception status for ${validated.bot_id}:`,
+          dbErr,
+        );
       }
-    } catch (webhookErr) {
-      console.error(`Webhook setup error for ${validated.bot_id}:`, webhookErr);
-      await db
-        .prepare(
-          "UPDATE factory_bots SET webhook_last_error = ? WHERE bot_id = ?",
-        )
-        .bind(String(webhookErr), validated.bot_id)
-        .run();
     }
   }
 
-  return { success: true };
+  return { success: true, webhook_ok, webhook_error };
 }
